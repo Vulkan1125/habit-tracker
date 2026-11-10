@@ -6,7 +6,11 @@ All notable changes to `habit` are recorded here. The format follows
 
 ## [Unreleased]
 
-Nothing yet.
+### Packaging
+
+- A `release packages` workflow now builds and attaches a Debian `.deb`, Fedora `.rpm`, Arch
+  `.pkg.tar.zst`, universal macOS `.tar.gz`, static Linux `.tar.gz` and `SHA256SUMS` to each
+  published GitHub release. It also runs on demand for an existing tag.
 
 ## [0.3.3] — 2026-11-10
 

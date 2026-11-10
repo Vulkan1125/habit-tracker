@@ -1,0 +1,261 @@
+name: release packages
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to attach packages to (for example v0.3.3)
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  REF: ${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  linux:
+    name: linux (static x86_64)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+
+      - name: Install Rust target
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Build
+        run: cargo build --release --locked --target x86_64-unknown-linux-musl
+
+      - name: Package
+        run: |
+          version="${REF#v}"
+          dir="habit-${version}-x86_64-linux-musl"
+          mkdir -p "dist/${dir}"
+          cp target/x86_64-unknown-linux-musl/release/habit "dist/${dir}/habit"
+          cp README.md LICENSE "dist/${dir}/"
+          tar -C dist -czf "dist/${dir}.tar.gz" "${dir}"
+          file "dist/${dir}/habit"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-binary
+          path: dist/*.tar.gz
+
+  macos:
+    name: macos (universal)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+
+      - name: Build both architectures
+        run: |
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          cargo build --release --locked --target aarch64-apple-darwin
+          cargo build --release --locked --target x86_64-apple-darwin
+
+      - name: Package universal binary
+        run: |
+          version="${REF#v}"
+          dir="habit-${version}-macos-universal"
+          mkdir -p "dist/${dir}"
+          lipo -create -output "dist/${dir}/habit" \
+            target/aarch64-apple-darwin/release/habit \
+            target/x86_64-apple-darwin/release/habit
+          cp README.md LICENSE "dist/${dir}/"
+          tar -C dist -czf "dist/${dir}.tar.gz" "${dir}"
+          lipo -info "dist/${dir}/habit"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-binary
+          path: dist/*.tar.gz
+
+  deb:
+    name: debian package
+    needs: linux
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-binary
+          path: linux-binary
+
+      - name: Build .deb
+        run: |
+          version="${REF#v}"
+          mkdir -p linux-binary/extracted
+          tar -xzf linux-binary/*.tar.gz -C linux-binary/extracted
+          root="deb-root"
+          rm -rf "$root"
+          mkdir -p "$root/DEBIAN" "$root/usr/bin" "$root/usr/share/doc/habit"
+          cp linux-binary/extracted/habit-*/habit "$root/usr/bin/habit"
+          cp README.md "$root/usr/share/doc/habit/README.md"
+          cp LICENSE "$root/usr/share/doc/habit/LICENSE"
+          cat > "$root/DEBIAN/control" <<EOF
+          Package: habit
+          Version: ${version}
+          Architecture: amd64
+          Maintainer: Vulkan1125 <Vulkan1125@users.noreply.github.com>
+          Section: utils
+          Priority: optional
+          Description: A calm terminal habit tracker
+           Streaks, weekly quotas, cheat days, tags, dated notes and a heatmap,
+           with a plain JSON data file and no daemon, account or network access.
+          EOF
+          mkdir -p dist
+          dpkg-deb --build --root-owner-group "$root" "dist/habit_${version}_amd64.deb"
+          dpkg-deb --info "dist/habit_${version}_amd64.deb"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-package
+          path: dist/*.deb
+
+  rpm:
+    name: fedora package
+    needs: linux
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-binary
+          path: linux-binary
+
+      - name: Install rpmbuild
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm
+
+      - name: Build .rpm
+        run: |
+          version="${REF#v}"
+          mkdir -p linux-binary/extracted
+          tar -xzf linux-binary/*.tar.gz -C linux-binary/extracted
+          mkdir -p rpmbuild/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS} dist
+          cp linux-binary/extracted/habit-*/habit rpmbuild/SOURCES/habit
+          cp LICENSE rpmbuild/SOURCES/LICENSE
+          cp README.md rpmbuild/SOURCES/README.md
+          cat > rpmbuild/SPECS/habit.spec <<EOF
+          Name:           habit
+          Version:        ${version}
+          Release:        1
+          Summary:        A calm terminal habit tracker
+          License:        MIT
+          URL:            https://github.com/Vulkan1125/habit-tracker
+          Source0:        habit
+          Source1:        LICENSE
+          Source2:        README.md
+          BuildArch:      x86_64
+          AutoReqProv:    no
+
+          %description
+          Streaks, weekly quotas, cheat days, tags, dated notes and a heatmap,
+          with a plain JSON data file and no daemon, account or network access.
+
+          %prep
+
+          %build
+
+          %install
+          install -Dm755 %{SOURCE0} %{buildroot}%{_bindir}/habit
+          install -Dm644 %{SOURCE1} %{buildroot}%{_datadir}/licenses/habit/LICENSE
+          install -Dm644 %{SOURCE2} %{buildroot}%{_docdir}/habit/README.md
+
+          %files
+          %{_bindir}/habit
+          %license %{_datadir}/licenses/habit/LICENSE
+          %doc %{_docdir}/habit/README.md
+
+          %changelog
+          EOF
+          rpmbuild --define "_topdir ${PWD}/rpmbuild" -bb rpmbuild/SPECS/habit.spec
+          cp rpmbuild/RPMS/x86_64/*.rpm "dist/habit-${version}-1.x86_64.rpm"
+          rpm -qip "dist/habit-${version}-1.x86_64.rpm"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm-package
+          path: dist/*.rpm
+
+  arch:
+    name: arch package
+    needs: linux
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-binary
+          path: linux-binary
+
+      - name: Install archive tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zstd libarchive-tools
+
+      - name: Build Arch package
+        run: |
+          version="${REF#v}"
+          mkdir -p linux-binary/extracted archpkg dist
+          tar -xzf linux-binary/*.tar.gz -C linux-binary/extracted
+          root="archpkg/habit"
+          rm -rf "$root"
+          mkdir -p "$root/usr/bin" "$root/usr/share/licenses/habit" "$root/usr/share/doc/habit"
+          cp linux-binary/extracted/habit-*/habit "$root/usr/bin/habit"
+          cp LICENSE "$root/usr/share/licenses/habit/LICENSE"
+          cp README.md "$root/usr/share/doc/habit/README.md"
+          size=$(du -sb "$root" | awk '{print $1}')
+          cat > "$root/.PKGINFO" <<EOF
+          # Generated by the habit release workflow
+          pkgname = habit
+          pkgbase = habit
+          pkgver = ${version}-1
+          pkgdesc = A calm terminal habit tracker
+          url = https://github.com/Vulkan1125/habit-tracker
+          builddate = $(date +%s)
+          packager = Vulkan1125 <Vulkan1125@users.noreply.github.com>
+          size = ${size}
+          arch = x86_64
+          license = MIT
+          EOF
+          (cd "$root" && bsdtar -czf .MTREE --format=mtree \
+            --options='!all,use-set,type,uid,gid,mode,time,size,md5,sha256,link' \
+            .PKGINFO usr)
+          (cd "$root" && tar --zstd -cf "../../dist/habit-${version}-1-x86_64.pkg.tar.zst" \
+            .PKGINFO .MTREE usr)
+          (cd dist && zstd -t habit-*.pkg.tar.zst)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch-package
+          path: dist/*.pkg.tar.zst
+
+  publish:
+    name: attach to release
+    needs: [linux, macos, deb, rpm, arch]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum habit-* habit_* > SHA256SUMS
+          ls -lh
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${REF}" dist/* --repo "${GITHUB_REPOSITORY}" --clobber

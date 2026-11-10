@@ -252,8 +252,8 @@ Gym · 4×/week · since 2026-09-14
 - **Atomic writes**: temp file → `fsync` → `rename`. A crash mid-save cannot truncate your history.
 - **Automatic backup**: the previous version is kept as `data.json.bak` on every save.
 - **Version guard**: a file written by a newer format is refused instead of silently mangled.
-- **Version upgrade**: a format-1 file loads with the new fields defaulted and is stamped format 2
-  on its next save, so old data is not stranded.
+- **Version upgrade**: an older file loads with the new fields defaulted and is stamped as the
+  current format on its next save, so old data is not stranded.
 - **Tolerant loading**: a missing or empty file means “no habits yet”, not an error.
 - **Hand-editable**: plain, pretty-printed JSON, and `r` reloads it without restarting.
 - **Failed saves revert the change in memory**, so the screen never lies about what's on disk.
@@ -264,6 +264,22 @@ No database, no sync, no telemetry, no async runtime, no plugin API. Nine direct
 mainstream. `cargo build --release` produces a single ~1.8 MB binary.
 
 ## Install
+
+Prebuilt packages are attached to each [GitHub release](https://github.com/Vulkan1125/habit-tracker/releases/latest):
+
+| Platform | Asset | Install |
+| --- | --- | --- |
+| Debian / Ubuntu | `habit_X.Y.Z_amd64.deb` | `sudo dpkg -i habit_X.Y.Z_amd64.deb` |
+| Fedora / RHEL | `habit-X.Y.Z-1.x86_64.rpm` | `sudo dnf install ./habit-X.Y.Z-1.x86_64.rpm` |
+| Arch Linux | `habit-X.Y.Z-1-x86_64.pkg.tar.zst` | `sudo pacman -U habit-X.Y.Z-1-x86_64.pkg.tar.zst` |
+| macOS (universal) | `habit-X.Y.Z-macos-universal.tar.gz` | `tar -xzf habit-X.Y.Z-macos-universal.tar.gz && sudo install -m 755 habit-X.Y.Z-macos-universal/habit /usr/local/bin/` |
+| Linux (static) | `habit-X.Y.Z-x86_64-linux-musl.tar.gz` | `tar -xzf habit-X.Y.Z-x86_64-linux-musl.tar.gz && install -m 755 habit-X.Y.Z-x86_64-linux-musl/habit ~/.local/bin/` |
+
+Every release also carries a `SHA256SUMS` file. The macOS binary is universal (Apple Silicon and
+Intel) but unsigned; if Gatekeeper quarantines it, remove the attribute with
+`xattr -d com.apple.quarantine habit`.
+
+From source:
 
 ```sh
 # from a clone
