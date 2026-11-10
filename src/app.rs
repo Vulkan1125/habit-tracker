@@ -12,7 +12,7 @@ use ratatui::layout::Rect;
 use ratatui::widgets::ListState;
 
 use crate::config::Config;
-use crate::model::{Data, Day, Habit};
+use crate::model::{Data, Day, Habit, TagError};
 use crate::stats;
 use crate::store::Store;
 use crate::theme::{ColorMode, Theme, ThemeName};
@@ -30,6 +30,39 @@ pub enum Mode {
     Confirm(Confirm),
     Form(Box<Form>),
     Note(NoteEntry),
+    Tag(TagEntry),
+}
+
+/// The rename prompt, opened from the tags tab.
+pub struct TagEntry {
+    /// The tag being renamed, shown in the title while the field is empty.
+    pub from: String,
+    pub input: crate::ui::form::TextInput,
+    /// Why the name in the field cannot be used, shown in place of the hint.
+    pub error: Option<String>,
+}
+
+pub enum TagAction {
+    Continue,
+    Cancel,
+    Submit(String),
+}
+
+impl TagEntry {
+    pub fn handle_key(&mut self, key: KeyEvent) -> TagAction {
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+            return TagAction::Cancel;
+        }
+        match key.code {
+            KeyCode::Esc => TagAction::Cancel,
+            KeyCode::Enter => TagAction::Submit(self.input.text()),
+            _ => {
+                self.error = None;
+                edit_input(&mut self.input, key);
+                TagAction::Continue
+            }
+        }
+    }
 }
 
 /// Which half of the note dialog has the keyboard.
@@ -191,6 +224,11 @@ pub struct Confirm {
 
 pub enum ConfirmAction {
     Delete(String),
+    /// Fold `from` into `to`; both are already normalised.
+    MergeTag {
+        from: String,
+        to: String,
+    },
 }
 
 pub struct Flash {
@@ -373,6 +411,81 @@ impl App {
         self.clamp_cursor();
     }
 
+    /// Opens the rename prompt on the tag under the cursor.
+    fn start_tag_rename(&mut self) {
+        let tags = self.tags();
+        let Some((tag, _)) = tags.get(self.tag_cursor.min(tags.len().saturating_sub(1))) else {
+            self.flash_err("no tags yet");
+            return;
+        };
+        self.mode = Mode::Tag(TagEntry {
+            from: tag.clone(),
+            input: crate::ui::form::TextInput::with_limit(crate::model::TAG_MAX_CHARS),
+            error: None,
+        });
+    }
+
+    fn submit_tag_rename(&mut self, mut entry: TagEntry, text: &str) {
+        let Some(to) = crate::model::normalize_tag(text) else {
+            entry.error = Some(TagError::Invalid.message().to_string());
+            self.mode = Mode::Tag(entry);
+            return;
+        };
+        if to == entry.from {
+            entry.error = Some(TagError::Same.message().to_string());
+            self.mode = Mode::Tag(entry);
+            return;
+        }
+        // Renaming onto a name that is already in use folds the two tags into
+        // one, which throws a name away: ask before doing that.
+        if self.tags().iter().any(|(name, _)| *name == to) {
+            self.mode = Mode::Confirm(Confirm {
+                prompt: format!("Merge #{} into #{to}?", entry.from),
+                action: ConfirmAction::MergeTag {
+                    from: entry.from,
+                    to,
+                },
+            });
+            return;
+        }
+        self.apply_tag_rename(&entry.from, &to);
+    }
+
+    fn apply_tag_rename(&mut self, from: &str, to: &str) {
+        let before = self.data.clone();
+        let outcome = match self.data.rename_tag(from, to) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                self.flash_err(error.message());
+                return;
+            }
+        };
+        if !self.commit(before) {
+            return;
+        }
+        // The list re-sorts around the new name; keep the cursor on it.
+        self.tag_cursor = self
+            .tags()
+            .iter()
+            .position(|(name, _)| *name == outcome.to)
+            .unwrap_or(0);
+        let habits = match outcome.habits {
+            1 => "1 habit".to_string(),
+            count => format!("{count} habits"),
+        };
+        if outcome.merged {
+            self.flash_ok(format!(
+                "merged #{} into #{} · {habits}",
+                outcome.from, outcome.to
+            ));
+        } else {
+            self.flash_ok(format!(
+                "renamed #{} to #{} · {habits}",
+                outcome.from, outcome.to
+            ));
+        }
+    }
+
     fn start_note(&mut self) {
         let Some(habit) = self.selected_habit() else {
             self.flash_err("select a habit first");
@@ -535,6 +648,14 @@ impl App {
                 }
                 Ok(())
             }
+            Mode::Tag(mut entry) => {
+                match entry.handle_key(key) {
+                    TagAction::Continue => self.mode = Mode::Tag(entry),
+                    TagAction::Cancel => {}
+                    TagAction::Submit(text) => self.submit_tag_rename(entry, &text),
+                }
+                Ok(())
+            }
         }
     }
 
@@ -567,6 +688,10 @@ impl App {
                     self.open_focused_tag();
                     return Ok(());
                 }
+                KeyCode::Char('e') => {
+                    self.start_tag_rename();
+                    return Ok(());
+                }
                 // Global keys still work, but habit actions must not fire on a
                 // row that is not on screen.
                 KeyCode::Tab
@@ -574,6 +699,7 @@ impl App {
                 | KeyCode::Char('m')
                 | KeyCode::Char('b')
                 | KeyCode::Char('r')
+                | KeyCode::Char('u')
                 | KeyCode::Char('/')
                 | KeyCode::Char('?')
                 | KeyCode::Char('q') => {}
@@ -672,6 +798,7 @@ impl App {
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => match confirm.action {
                 ConfirmAction::Delete(id) => self.delete_habit(&id),
+                ConfirmAction::MergeTag { from, to } => self.apply_tag_rename(&from, &to),
             },
             _ => {}
         }
@@ -1278,6 +1405,165 @@ mod tests {
             app.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE))
                 .unwrap();
         }
+    }
+
+    fn press(app: &mut App, code: KeyCode) {
+        app.handle_key(KeyEvent::new(code, KeyModifiers::NONE))
+            .unwrap();
+    }
+
+    fn type_text(app: &mut App, text: &str) {
+        for character in text.chars() {
+            press(app, KeyCode::Char(character));
+        }
+    }
+
+    /// Habits tab → Tags tab → the rename prompt on the tag under the cursor.
+    fn start_rename(app: &mut App) {
+        press(app, KeyCode::Tab);
+        press(app, KeyCode::Char('e'));
+    }
+
+    #[test]
+    fn the_rename_prompt_renames_the_tag_under_the_cursor() {
+        let mut app = app();
+        start_rename(&mut app);
+        let Mode::Tag(entry) = &app.mode else {
+            panic!("expected the rename prompt");
+        };
+        assert_eq!(entry.from, "health");
+        assert!(entry.error.is_none());
+
+        type_text(&mut app, "Fitness");
+        press(&mut app, KeyCode::Enter);
+
+        assert!(matches!(app.mode, Mode::Normal));
+        assert_eq!(app.data.habits[0].tags, vec!["fitness", "morning"]);
+        assert!(app.flash.as_ref().is_some_and(|flash| !flash.error));
+        assert_eq!(
+            app.flash.as_ref().map(|flash| flash.text.as_str()),
+            Some("renamed #health to #fitness · 1 habit")
+        );
+        // The cursor stays on the renamed tag now that the list is sorted.
+        assert_eq!(app.tags()[app.tag_cursor].0, "fitness");
+    }
+
+    #[test]
+    fn renaming_onto_a_tag_in_use_asks_before_merging() {
+        let mut app = app();
+        app.data.habits[0].tags = vec!["body".into(), "health".into()];
+        press(&mut app, KeyCode::Tab);
+        // body sorts first, so walk down to health.
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Char('e'));
+        type_text(&mut app, "body");
+        press(&mut app, KeyCode::Enter);
+
+        let Mode::Confirm(confirm) = &app.mode else {
+            panic!("merging should ask first");
+        };
+        assert_eq!(confirm.prompt, "Merge #health into #body?");
+
+        // Saying no leaves everything alone.
+        press(&mut app, KeyCode::Char('n'));
+        assert!(matches!(app.mode, Mode::Normal));
+        assert_eq!(app.data.habits[0].tags, vec!["body", "health"]);
+
+        press(&mut app, KeyCode::Char('e'));
+        type_text(&mut app, "body");
+        press(&mut app, KeyCode::Enter);
+        press(&mut app, KeyCode::Char('y'));
+
+        assert!(matches!(app.mode, Mode::Normal));
+        assert_eq!(app.data.habits[0].tags, vec!["body"]);
+        assert_eq!(app.tags(), vec![("body".to_string(), 1)]);
+        assert_eq!(
+            app.flash.as_ref().map(|flash| flash.text.as_str()),
+            Some("merged #health into #body · 1 habit")
+        );
+    }
+
+    #[test]
+    fn a_bad_tag_name_keeps_the_prompt_open() {
+        let mut app = app();
+        start_rename(&mut app);
+        press(&mut app, KeyCode::Enter);
+        let Mode::Tag(entry) = &app.mode else {
+            panic!("an empty name should not close the prompt");
+        };
+        assert_eq!(
+            entry.error.as_deref(),
+            Some("a tag needs at least one letter or digit")
+        );
+
+        type_text(&mut app, "!!!");
+        press(&mut app, KeyCode::Enter);
+        let Mode::Tag(entry) = &app.mode else {
+            panic!("a nameless tag should not close the prompt");
+        };
+        assert!(entry.error.is_some());
+
+        // Typing again clears the complaint.
+        type_text(&mut app, "he");
+        let Mode::Tag(entry) = &app.mode else {
+            panic!("still open");
+        };
+        assert!(entry.error.is_none());
+
+        // The old name itself is refused.
+        press(&mut app, KeyCode::Home);
+        for _ in 0..8 {
+            press(&mut app, KeyCode::Delete);
+        }
+        type_text(&mut app, "health");
+        press(&mut app, KeyCode::Enter);
+        let Mode::Tag(entry) = &app.mode else {
+            panic!("the same name should not close the prompt");
+        };
+        assert_eq!(
+            entry.error.as_deref(),
+            Some("that is already the tag's name")
+        );
+        assert_eq!(app.data.habits[0].tags, vec!["health", "morning"]);
+    }
+
+    #[test]
+    fn esc_leaves_the_rename_prompt_without_touching_the_data() {
+        let mut app = app();
+        start_rename(&mut app);
+        type_text(&mut app, "fitness");
+        press(&mut app, KeyCode::Esc);
+        assert!(matches!(app.mode, Mode::Normal));
+        assert_eq!(app.data.habits[0].tags, vec!["health", "morning"]);
+    }
+
+    #[test]
+    fn a_rename_can_be_undone() {
+        let mut app = app();
+        start_rename(&mut app);
+        type_text(&mut app, "fitness");
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.data.habits[0].tags, vec!["fitness", "morning"]);
+
+        press(&mut app, KeyCode::Char('u'));
+        assert_eq!(app.data.habits[0].tags, vec!["health", "morning"]);
+    }
+
+    #[test]
+    fn the_rename_prompt_needs_a_tag() {
+        let mut app = App::new(
+            Store::resolve(None).unwrap(),
+            Data::default(),
+            date("2026-11-10"),
+            &Config::default(),
+        );
+        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Char('e'));
+        assert!(matches!(app.mode, Mode::Normal));
+        assert_eq!(
+            app.flash.as_ref().map(|flash| flash.text.as_str()),
+            Some("no tags yet")
+        );
     }
 
     #[test]

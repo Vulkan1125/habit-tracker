@@ -119,6 +119,24 @@ pub enum Command {
     },
     /// List every tag with its habit count
     Tags,
+    /// Rename a tag everywhere it is used (merges if the name is already taken)
+    RenameTag {
+        /// The tag to rename
+        #[arg(value_name = "OLD")]
+        from: String,
+        /// The new name
+        #[arg(value_name = "NEW")]
+        to: String,
+    },
+    /// Fold one tag into another that already exists
+    MergeTags {
+        /// The tag to fold away
+        #[arg(value_name = "FROM")]
+        from: String,
+        /// The tag that stays
+        #[arg(value_name = "INTO")]
+        into: String,
+    },
     /// Set or clear a habit's description
     #[command(alias = "note")]
     Describe {
@@ -306,6 +324,16 @@ pub fn run(
             }
         }
         Command::Tags => print_tags(data),
+        Command::RenameTag { from, to } => rename_tag(store, data, &from, &to)?,
+        Command::MergeTags { from, into } => {
+            // Merging is the careful spelling of a rename: the target has to be
+            // a real tag, so a typo cannot quietly create a new one.
+            if !data.has_tag(&into) {
+                let into = normalize_tag(&into).unwrap_or(into);
+                bail!("there is no tag #{into}; use `habit rename-tag` to create one");
+            }
+            rename_tag(store, data, &from, &into)?
+        }
         Command::Describe { habit, text, clear } => {
             let index = data.resolve_index(&habit)?;
             let habit = &mut data.habits[index];
@@ -710,6 +738,22 @@ fn print_tags(data: &Data) {
     }
 }
 
+/// Renames one tag onto another, saving only when something changed.
+fn rename_tag(store: &Store, data: &mut Data, from: &str, to: &str) -> Result<()> {
+    let outcome = match data.rename_tag(from, to) {
+        Ok(outcome) => outcome,
+        Err(error) => bail!("{}", error.message()),
+    };
+    store.save(data)?;
+    let habits = crate::format::plural(outcome.habits as u32, "habit");
+    if outcome.merged {
+        println!("merged #{} into #{} on {habits}", outcome.from, outcome.to);
+    } else {
+        println!("renamed #{} to #{} on {habits}", outcome.from, outcome.to);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -921,6 +965,115 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.to_string().contains("does not run"));
+    }
+
+    #[test]
+    fn rename_tag_rewrites_every_habit_and_saves() {
+        let (_dir, store) = store();
+        let mut data = Data::default();
+        let today = date("2026-11-10");
+        data.add_habit("Gym", Schedule::Daily, today).unwrap();
+        data.add_habit("Read", Schedule::Daily, today).unwrap();
+        data.habits[0].tags = vec!["health".into()];
+        data.habits[1].tags = vec!["health".into(), "mind".into()];
+
+        run(
+            Command::RenameTag {
+                from: "#Health".into(),
+                to: "Fitness".into(),
+            },
+            &store,
+            &mut data,
+            today,
+            &Config::default(),
+        )
+        .unwrap();
+
+        assert_eq!(data.habits[0].tags, vec!["fitness"]);
+        assert_eq!(data.habits[1].tags, vec!["fitness", "mind"]);
+        // Saved, not just changed in memory.
+        let reloaded = store.load().unwrap();
+        assert_eq!(reloaded.habits[0].tags, vec!["fitness"]);
+    }
+
+    #[test]
+    fn rename_tag_onto_a_taken_name_merges() {
+        let (_dir, store) = store();
+        let mut data = Data::default();
+        let today = date("2026-11-10");
+        data.add_habit("Gym", Schedule::Daily, today).unwrap();
+        data.habits[0].tags = vec!["health".into(), "body".into()];
+
+        run(
+            Command::RenameTag {
+                from: "health".into(),
+                to: "body".into(),
+            },
+            &store,
+            &mut data,
+            today,
+            &Config::default(),
+        )
+        .unwrap();
+        assert_eq!(data.habits[0].tags, vec!["body"]);
+    }
+
+    #[test]
+    fn merge_tags_needs_a_real_target() {
+        let (_dir, store) = store();
+        let mut data = Data::default();
+        let today = date("2026-11-10");
+        data.add_habit("Gym", Schedule::Daily, today).unwrap();
+        data.habits[0].tags = vec!["health".into()];
+
+        // A typo in the target must not quietly rename the tag.
+        let error = run(
+            Command::MergeTags {
+                from: "health".into(),
+                into: "bdy".into(),
+            },
+            &store,
+            &mut data,
+            today,
+            &Config::default(),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("no tag #bdy"), "{error}");
+        assert_eq!(data.habits[0].tags, vec!["health"]);
+
+        run(
+            Command::MergeTags {
+                from: "health".into(),
+                into: "body".into(),
+            },
+            &store,
+            &mut data,
+            today,
+            &Config::default(),
+        )
+        .unwrap_err();
+        assert_eq!(data.habits[0].tags, vec!["health"]);
+    }
+
+    #[test]
+    fn a_missing_tag_cannot_be_renamed() {
+        let (_dir, store) = store();
+        let mut data = Data::default();
+        let today = date("2026-11-10");
+        data.add_habit("Gym", Schedule::Daily, today).unwrap();
+
+        let error = run(
+            Command::RenameTag {
+                from: "nope".into(),
+                to: "body".into(),
+            },
+            &store,
+            &mut data,
+            today,
+            &Config::default(),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("no habit carries"), "{error}");
     }
 
     #[test]

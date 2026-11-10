@@ -271,6 +271,9 @@ impl Habit {
     }
 }
 
+/// Longest tag `normalize_tag` will produce.
+pub const TAG_MAX_CHARS: usize = 20;
+
 /// `#Health & Focus` → `health-focus`; `None` when nothing usable is left.
 pub fn normalize_tag(raw: &str) -> Option<String> {
     let raw = raw.trim().trim_start_matches('#');
@@ -286,12 +289,44 @@ pub fn normalize_tag(raw: &str) -> Option<String> {
         } else {
             pending_dash = true;
         }
-        if tag.chars().count() >= 20 {
+        if tag.chars().count() >= TAG_MAX_CHARS {
             break;
         }
     }
     let tag = tag.trim_matches('-').to_string();
     (!tag.is_empty()).then_some(tag)
+}
+
+/// What a tag rename did, so the caller can word it accurately.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagRename {
+    pub from: String,
+    pub to: String,
+    /// Habits whose tag list actually changed.
+    pub habits: usize,
+    /// `to` already existed, so two tags became one instead of one being renamed.
+    pub merged: bool,
+}
+
+/// Why a tag rename was refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TagError {
+    /// Neither name survives normalisation.
+    Invalid,
+    /// Both names normalise to the same tag.
+    Same,
+    /// No habit carries the tag being renamed.
+    Missing,
+}
+
+impl TagError {
+    pub fn message(self) -> &'static str {
+        match self {
+            TagError::Invalid => "a tag needs at least one letter or digit",
+            TagError::Same => "that is already the tag's name",
+            TagError::Missing => "no habit carries that tag",
+        }
+    }
 }
 
 /// Completion history: `date -> set of habit ids`.
@@ -639,6 +674,47 @@ impl Data {
         order
     }
 
+    /// Whether any habit carries `raw`, after normalisation.
+    pub fn has_tag(&self, raw: &str) -> bool {
+        let Some(tag) = normalize_tag(raw) else {
+            return false;
+        };
+        self.habits.iter().any(|habit| habit.has_tag(&tag))
+    }
+
+    /// Renames a tag on every habit that carries it.
+    ///
+    /// When the new name is already in use the two tags are folded into one, so
+    /// a rename doubles as a merge. Habits that carried both names end up with
+    /// a single copy. Archived and finished habits are rewritten too: the tag is
+    /// part of their history, not just of what is on screen.
+    pub fn rename_tag(&mut self, raw_from: &str, raw_to: &str) -> Result<TagRename, TagError> {
+        let from = normalize_tag(raw_from).ok_or(TagError::Invalid)?;
+        let to = normalize_tag(raw_to).ok_or(TagError::Invalid)?;
+        if from == to {
+            return Err(TagError::Same);
+        }
+        if !self.habits.iter().any(|habit| habit.has_tag(&from)) {
+            return Err(TagError::Missing);
+        }
+        let merged = self.habits.iter().any(|habit| habit.has_tag(&to));
+        let mut habits = 0;
+        for habit in &mut self.habits {
+            if !habit.has_tag(&from) {
+                continue;
+            }
+            habit.remove_tag(&from);
+            habit.add_tag(&to);
+            habits += 1;
+        }
+        Ok(TagRename {
+            from,
+            to,
+            habits,
+            merged,
+        })
+    }
+
     /// Habits that are still running and scheduled for `today`.
     pub fn due_today(&self, today: NaiveDate) -> usize {
         self.habits
@@ -863,6 +939,61 @@ mod tests {
         assert_eq!(habit.tags, vec!["morning"]);
         assert!(!habit.remove_tag("missing"));
         assert_eq!(normalize_tag("!!!"), None);
+    }
+
+    #[test]
+    fn renaming_a_tag_rewrites_every_habit_that_carries_it() {
+        let mut data = Data::default();
+        let day = date("2026-11-01");
+        data.add_habit("Gym", Schedule::Daily, day).unwrap();
+        data.add_habit("Read", Schedule::Daily, day).unwrap();
+        data.add_habit("Run", Schedule::Daily, day).unwrap();
+        data.habits[0].tags = vec!["health".into(), "morning".into()];
+        data.habits[1].tags = vec!["mind".into()];
+        data.habits[2].tags = vec!["health".into()];
+        data.habits[2].archived = true;
+
+        let outcome = data.rename_tag("#Health", "Fitness").unwrap();
+        assert_eq!(outcome.from, "health");
+        assert_eq!(outcome.to, "fitness");
+        assert_eq!(outcome.habits, 2);
+        assert!(!outcome.merged);
+        // Archived habits are rewritten too: the tag is theirs as well.
+        assert_eq!(data.habits[0].tags, vec!["fitness", "morning"]);
+        assert_eq!(data.habits[1].tags, vec!["mind"]);
+        assert_eq!(data.habits[2].tags, vec!["fitness"]);
+        assert!(!data.has_tag("health"));
+        assert!(data.has_tag("fitness"));
+    }
+
+    #[test]
+    fn renaming_onto_a_taken_name_merges_the_two() {
+        let mut data = Data::default();
+        let day = date("2026-11-01");
+        data.add_habit("Gym", Schedule::Daily, day).unwrap();
+        data.add_habit("Read", Schedule::Daily, day).unwrap();
+        data.habits[0].tags = vec!["health".into(), "body".into()];
+        data.habits[1].tags = vec!["body".into()];
+
+        let outcome = data.rename_tag("health", "body").unwrap();
+        assert!(outcome.merged);
+        assert_eq!(outcome.habits, 1);
+        // The habit that carried both ends up with one copy.
+        assert_eq!(data.habits[0].tags, vec!["body"]);
+        assert_eq!(data.habits[1].tags, vec!["body"]);
+    }
+
+    #[test]
+    fn a_rename_needs_two_different_known_tags() {
+        let mut data = Data::default();
+        data.add_habit("Gym", Schedule::Daily, date("2026-11-01"))
+            .unwrap();
+        data.habits[0].tags = vec!["health".into()];
+
+        assert_eq!(data.rename_tag("health", "!!!"), Err(TagError::Invalid));
+        assert_eq!(data.rename_tag("health", "#HEALTH"), Err(TagError::Same));
+        assert_eq!(data.rename_tag("missing", "else"), Err(TagError::Missing));
+        assert_eq!(data.habits[0].tags, vec!["health"]);
     }
 
     #[test]

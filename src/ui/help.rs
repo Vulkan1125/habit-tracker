@@ -20,7 +20,7 @@ const KEYS: &[(&str, &str)] = &[
     ("n", "note for a chosen day"),
     ("b", "show / hide the bottom bar"),
     ("a", "add a habit"),
-    ("e", "edit the selected habit"),
+    ("e", "edit a habit · rename a tag"),
     ("d", "archive or restore"),
     ("x", "delete (asks first)"),
     ("u", "undo the last change"),

@@ -8,6 +8,23 @@ All notable changes to `habit` are recorded here. The format follows
 
 Nothing yet.
 
+## [0.5.0] — 2026-11-10
+
+### Added
+
+- **Tags can be renamed and merged.** On the Tags tab `e` opens a prompt for the tag under the
+  cursor; the new name is written onto every habit that carries it, archived ones included. If the
+  name is already in use the dialog asks first, because that folds two tags into one — so `#health`
+  and `#body` can become a single tag without editing habits one by one. `esc` cancels, `u` undoes,
+  and the cursor stays on the renamed tag.
+- `habit rename-tag <OLD> <NEW>` does the same from the shell (and merges when `NEW` exists), while
+  `habit merge-tags <FROM> <INTO>` is the careful spelling: it refuses a target that is not already
+  a tag, so a typo cannot quietly create a new one.
+
+### Changed
+
+- `u` (undo) now works on the Tags tab too, where it used to be swallowed by the tag list.
+
 ## [0.4.1] — 2026-11-10
 
 ### Fixed
@@ -212,7 +229,8 @@ First release.
   failure modes, form validation and TUI rendering via `TestBackend`.
 - CI on Linux and macOS (format, clippy, tests, MSRV 1.88) and a release profile with LTO + strip.
 
-[Unreleased]: https://github.com/Vulkan1125/habit-tracker/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/Vulkan1125/habit-tracker/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.5.0
 [0.4.1]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.4.1
 [0.4.0]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.4.0
 [0.3.3]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.3.3

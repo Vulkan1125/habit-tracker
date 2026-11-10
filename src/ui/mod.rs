@@ -11,7 +11,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
 
-use crate::app::{App, Mode};
+use crate::app::{App, Mode, Tab};
 use crate::format::{truncate, width};
 use crate::theme::Theme;
 
@@ -50,8 +50,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Mode::Normal => {}
         Mode::Help => help::draw(frame, area, &theme),
         Mode::Form(form) => form.draw(frame, area, &theme),
-        Mode::Confirm(confirm) => confirm_overlay(frame, area, &theme, &confirm.prompt),
+        Mode::Confirm(confirm) => confirm_overlay(frame, area, &theme, confirm),
         Mode::Note(entry) => note_overlay(frame, area, &theme, entry),
+        Mode::Tag(entry) => tag_overlay(frame, area, &theme, entry),
     }
 }
 
@@ -145,6 +146,10 @@ fn hint(app: &App, max_width: usize) -> String {
         Mode::Form(_) => "tab next · enter save · esc cancel".to_string(),
         Mode::Confirm(_) => "y confirm · n cancel".to_string(),
         Mode::Note(_) => "tab date/note · ↑↓ day · enter save · esc cancel".to_string(),
+        Mode::Tag(_) => "enter rename · esc cancel · an existing name merges".to_string(),
+        Mode::Normal if app.tab == Tab::Tags && app.tag_focus.is_none() => {
+            "j k move · enter open · e rename · tab habits · ? help · q quit".to_string()
+        }
         Mode::Normal if app.filtering => {
             "type to filter · #tag for tags · enter keep · esc clear".to_string()
         }
@@ -246,7 +251,54 @@ fn field_text(input: &crate::ui::form::TextInput, focused: bool) -> String {
     text.into_iter().collect()
 }
 
-fn confirm_overlay(frame: &mut Frame, area: Rect, theme: &Theme, prompt: &str) {
+fn tag_overlay(frame: &mut Frame, area: Rect, theme: &Theme, entry: &crate::app::TagEntry) {
+    let width = area.width.saturating_sub(4).clamp(34, 60);
+    let height = 5.min(area.height);
+    let popup = Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+    frame.render_widget(Clear, popup);
+    let title = format!(" Rename · #{} ", truncate(&entry.from, 24));
+    let border = if entry.error.is_some() {
+        theme.missed
+    } else {
+        theme.accent
+    };
+    let block = Block::bordered()
+        .title(title)
+        .border_style(Style::default().fg(border))
+        .style(theme.base());
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    let room = inner.width as usize;
+    let name_line = Line::from(vec![
+        Span::styled("name  ", Style::default().fg(theme.dim)),
+        Span::styled(
+            truncate(&field_text(&entry.input, true), room.saturating_sub(6)),
+            Style::default().fg(theme.fg),
+        ),
+    ]);
+    let tail = match &entry.error {
+        Some(message) => Line::from(Span::styled(
+            truncate(message, room),
+            Style::default().fg(theme.missed),
+        )),
+        None => Line::from(Span::styled(
+            truncate("enter rename · esc cancel · an existing name merges", room),
+            Style::default().fg(theme.dim),
+        )),
+    };
+    frame.render_widget(
+        Paragraph::new(vec![name_line, Line::raw(""), tail]).style(theme.base()),
+        inner,
+    );
+}
+
+fn confirm_overlay(frame: &mut Frame, area: Rect, theme: &Theme, confirm: &crate::app::Confirm) {
     let width = area.width.saturating_sub(4).clamp(30, 60);
     let height = 5.min(area.height);
     let popup = Rect {
@@ -256,9 +308,15 @@ fn confirm_overlay(frame: &mut Frame, area: Rect, theme: &Theme, prompt: &str) {
         height,
     };
     frame.render_widget(Clear, popup);
+    // Deleting a habit and folding two tags together both throw something away,
+    // but only the first is irreversible.
+    let (border, yes, no) = match &confirm.action {
+        crate::app::ConfirmAction::Delete(_) => (theme.missed, " delete   ", " keep"),
+        crate::app::ConfirmAction::MergeTag { .. } => (theme.warn, " merge    ", " cancel"),
+    };
     let block = Block::bordered()
         .title(" Confirm ")
-        .border_style(Style::default().fg(theme.missed))
+        .border_style(Style::default().fg(border))
         .style(theme.base());
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
@@ -266,7 +324,7 @@ fn confirm_overlay(frame: &mut Frame, area: Rect, theme: &Theme, prompt: &str) {
     frame.render_widget(
         Paragraph::new(vec![
             Line::from(Span::styled(
-                truncate(prompt, inner.width as usize),
+                truncate(&confirm.prompt, inner.width as usize),
                 Style::default(),
             )),
             Line::raw(""),
@@ -277,14 +335,14 @@ fn confirm_overlay(frame: &mut Frame, area: Rect, theme: &Theme, prompt: &str) {
                         .fg(theme.missed)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(" delete   ", Style::default().fg(theme.dim)),
+                Span::styled(yes, Style::default().fg(theme.dim)),
                 Span::styled(
                     "n",
                     Style::default()
                         .fg(theme.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(" keep", Style::default().fg(theme.dim)),
+                Span::styled(no, Style::default().fg(theme.dim)),
             ]),
         ])
         .style(theme.base()),
@@ -330,6 +388,48 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| draw(frame, app)).unwrap();
         terminal.backend().buffer().clone()
+    }
+
+    #[test]
+    fn the_rename_prompt_names_the_tag_it_will_change() {
+        let mut app = app_with("Gym");
+        app.data.habits[0].tags = vec!["health".into()];
+        app.select_tab(Tab::Tags);
+        app.handle_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('e'),
+            crossterm::event::KeyModifiers::NONE,
+        ))
+        .unwrap();
+
+        let screen = render(&mut app, 90, 24);
+        assert!(screen.contains("Rename · #health"), "{screen}");
+        assert!(screen.contains("name"), "{screen}");
+        assert!(screen.contains("an existing name merges"), "{screen}");
+    }
+
+    #[test]
+    fn the_tag_list_says_how_to_rename() {
+        let mut app = app_with("Gym");
+        app.data.habits[0].tags = vec!["health".into()];
+        app.select_tab(Tab::Tags);
+        let screen = render(&mut app, 90, 24);
+        assert!(screen.contains("e rename"), "{screen}");
+    }
+
+    #[test]
+    fn a_merge_confirmation_is_worded_as_a_merge() {
+        let mut app = app_with("Gym");
+        app.mode = Mode::Confirm(crate::app::Confirm {
+            prompt: "Merge #health into #body?".to_string(),
+            action: crate::app::ConfirmAction::MergeTag {
+                from: "health".to_string(),
+                to: "body".to_string(),
+            },
+        });
+        let screen = render(&mut app, 90, 24);
+        assert!(screen.contains("Merge #health into #body?"), "{screen}");
+        assert!(screen.contains("merge"), "{screen}");
+        assert!(screen.contains("cancel"), "{screen}");
     }
 
     #[test]

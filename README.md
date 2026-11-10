@@ -133,7 +133,10 @@ description for compatibility.
 
 In the TUI, `tab` switches the left pane between **Habits** and **Tags**. The tag list shows each
 tag with its count of still-active habits; open a tag with `enter`, `space` or a click to see its
-active habits and, under an **Archive** heading, the archived or finished ones. Press `n` to write
+active habits and, under an **Archive** heading, the archived or finished ones. Press `e` on the
+tag list to rename the tag under the cursor: the name is rewritten on every habit that carries it,
+and typing a name that is already in use asks whether to merge the two, so a typo cannot silently
+create a near-duplicate tag. Press `n` to write
 or edit a note — right after checking a habit off is the natural moment. The dialog opens on the
 day you are looking at (today unless you moved with `[` / `]`), and `tab` moves into its date field
 if you want another day: `↑` / `↓` step one day and typing takes any `YYYY-MM-DD`. A date in the
@@ -386,7 +389,7 @@ Nothing else to configure. The data file is created on the first change.
 | `j` `k`, `↑` `↓` | move the habit or tag selection |
 | `g` `G`, `Home` `End` | first / last habit |
 | `a` | add a habit |
-| `e` | edit the selected habit |
+| `e` | edit the selected habit, or rename the tag under the cursor on the Tags tab |
 | `d` | archive or restore (history kept) |
 | `x` | delete the habit and its history (asks first) |
 | `u` | undo the last change |
@@ -439,7 +442,7 @@ selection, weekly quota, start date, end date, tags and description.
 │j k ↑ ↓     move                                  │
 │g G         first / last                          │
 │a           add a habit                           │
-│e           edit the selected habit               │
+│e           edit a habit · rename a tag           │
 │d           archive or restore                    │
 │x           delete (asks first)                   │
 │u           undo the last change                  │
@@ -478,6 +481,8 @@ Global flags, usable before or after the subcommand:
 | `habit log` | `-n N` (default 14), `--all` | recent check-ins and cheat days, newest first |
 | `habit tag <HABIT> <TAG>…` | `--remove` | add or remove tags |
 | `habit tags` | | every tag with its habit count |
+| `habit rename-tag <OLD> <NEW>` | | rename a tag everywhere it is used; merges if `NEW` is taken |
+| `habit merge-tags <FROM> <INTO>` | | fold `FROM` into an existing tag `INTO` (refuses a name that does not exist) |
 | `habit describe <HABIT> [TEXT]` | `--clear` | set, print or clear the description (`habit note` is an alias) |
 | `habit start <HABIT> <DATE>` | | move the first day the habit counts |
 | `habit end <HABIT>` | `--date D`, `--clear` | set or clear the inclusive end date |
@@ -664,7 +669,7 @@ A few decisions worth knowing:
 ## Development
 
 ```sh
-cargo test                                  # 140 tests
+cargo test                                  # 156 tests
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 cargo build --release
