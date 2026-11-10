@@ -1,7 +1,7 @@
 # habit
 
 **A calm habit tracker for the terminal.** Streaks, weekly quotas, cheat days, tags, descriptions,
-dated notes and a heatmap — plus a plain JSON file you can read, diff and `grep`. One 1.8 MB Rust
+dated notes and a heatmap — plus a plain JSON file you can read, diff and `grep`. One 2 MB Rust
 binary with no daemon, no account and no network access.
 
 [![CI](https://github.com/Vulkan1125/habit-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/Vulkan1125/habit-tracker/actions/workflows/ci.yml)
@@ -75,9 +75,11 @@ habit end read-20-pages --date 2026-12-15
 habit end read-20-pages --clear
 ```
 
-Days outside that window are **not due**, not misses. A finished habit is labelled `finished`,
-sorts with archived habits, and its streak freezes on its final day instead of decaying forever.
-Both dates are editable in the TUI's add/edit dialog.
+Days outside that window are **not due**, not misses. A habit with an end date trades its schedule
+label for a countdown (`51d left`, then `last day`), turning amber in the final three days; once the
+date passes the row reads `ended`, the detail pane calls it `finished`, it sorts with archived
+habits, and its streak freezes on its final day instead of decaying forever. Both dates are
+editable in the TUI's add/edit dialog.
 
 ### Cheat days — one per calendar month
 
@@ -104,7 +106,7 @@ habit cheat gym --off           # remove it again
 - A day that is **not due** is skipped, not counted as a miss.
 - **Today** being unfinished never breaks a streak; it renders as `◌` (open) rather than a miss.
 - **Quota habits** count complete weeks. A half-finished week leaves the streak at its previous
-  value instead of zeroing it, and the sidebar shows `2/4 this week` meanwhile.
+  value instead of zeroing it, and the list shows `2/4 wk` meanwhile.
 - Days **before the start date** and **after the end date** are never shown as misses.
 - **The first cheat day** in a calendar month is skipped; any later one counts as a miss.
 - Checking off a **non-due day** is allowed and counts as extra credit (useful after a reshuffle).
@@ -122,6 +124,8 @@ habit add "Morning run" --tag health --tag morning --description "5k before brea
 habit tag gym health cardio       # add tags
 habit tag gym cardio --remove     # remove one
 habit tags                        # every tag with a habit count
+habit rename-tag health fitness   # rename everywhere; merges if the name is taken
+habit merge-tags morning mind     # fold one tag into an existing one
 habit list --tag health           # AND: every listed tag must match
 habit describe gym "ten minutes is enough"
 habit describe gym                # print the current description
@@ -136,13 +140,14 @@ tag with its count of still-active habits; open a tag with `enter`, `space` or a
 active habits and, under an **Archive** heading, the archived or finished ones. Press `e` on the
 tag list to rename the tag under the cursor: the name is rewritten on every habit that carries it,
 and typing a name that is already in use asks whether to merge the two, so a typo cannot silently
-create a near-duplicate tag. Press `n` to write
-or edit a note — right after checking a habit off is the natural moment. The dialog opens on the
-day you are looking at (today unless you moved with `[` / `]`), and `tab` moves into its date field
-if you want another day: `↑` / `↓` step one day and typing takes any `YYYY-MM-DD`. A date in the
-future or before the habit started is refused with an inline message and the dialog stays open;
-`esc` cancels, and saving an empty note removes it. Dates are shown on the left, notes on the
-right, newest first.
+create a near-duplicate tag.
+
+Press `n` to write or edit a note — right after checking a habit off is the natural moment. The
+dialog opens on the day you are looking at (today unless you moved with `[` / `]`), and `tab` moves
+into its date field if you want another day: `↑` / `↓` step one day and typing takes any
+`YYYY-MM-DD`. A date in the future or before the habit started is refused with an inline message
+and the dialog stays open; `esc` cancels, and saving an empty note removes it. Dates are shown on
+the left, notes on the right, newest first.
 
 ```
  habit  Tue 10 Nov 2026                                                            █████░ 3/4 today
@@ -176,7 +181,8 @@ and description. Multiple tokens are ANDed, so `run #morning` narrows to morning
 
 - **Habit list and Tags tabs** in the left pane, switchable with `tab` and clickable with the
   mouse. Each tag shows its active-habit count; opening one splits active habits from archived and
-  finished ones under an **Archive** heading.
+  finished ones under an **Archive** heading. On the tag list `e` renames the tag under the cursor,
+  or merges it into another tag after asking.
 - **Habit rows** with the selected day's marker, a 7-day dot strip and weekly quota progress.
   Habits with an end date replace the schedule label with a countdown (`51d left`, `last day`,
   `ended`), turning amber in the final three days.
@@ -192,7 +198,8 @@ and description. Multiple tokens are ANDed, so `run #morning` narrows to morning
   all validated inline.
 - **Instant feedback** in the status line, including streak effects and a warning when a second
   cheat in a month will break the run.
-- **One-step undo** for every mutation — check-off, cheat, add, edit, archive and delete.
+- **One-step undo** for every mutation — check-off, cheat, add, edit, rename/merge a tag, archive
+  and delete.
 - **Archive** instead of delete: history is kept and the habit renders dimmed at the bottom.
 - **Tag-aware filter** (`/`), **help overlay** (`?`), **reload from disk** (`r`).
 - **Theme switching without editing a file**: `T` steps through the seven palettes and `m` flips
@@ -229,8 +236,8 @@ of its id, so its colour survives sessions without being stored. `habit themes` 
 Every action is a subcommand, with real exit codes:
 
 ```console
-$ habit add "Gym" --weekly 4 --tag health
-added Gym [gym] · 4×/week · since 2026-11-10
+$ habit add "Gym" --weekly 4 --tag health --start 2026-09-14
+added Gym [gym] · 4×/week · since 2026-09-14
   tags #health
 
 $ habit done gym
@@ -240,7 +247,7 @@ $ habit cheat gym --date 2026-11-06
 ◆ Gym on 2026-11-06 · excused (1/1 cheat day in November)
 
 $ habit done read --date 2026-11-09      # backfill a missed day
-✓ Read 20 pages on 2026-11-09 · streak 2 days
+✓ Read 20 pages on 2026-11-09 · streak 1 day
 
 $ habit list --tag health
 ID       HABIT         SCHEDULE      TODAY STREAK
@@ -249,10 +256,12 @@ run      Morning run   daily             ✓ 3 days
 
 $ habit stats --habit gym --days 90
 Gym · 4×/week · since 2026-09-14
+  #health
   streak       1 week (best 3 weeks)
   this week    1/4
   completion   77% (28 of 36) over 90 days
   check-ins    28
+  cheat days   1 this month (limit 1)
 ```
 
 ### Data safety
@@ -269,12 +278,9 @@ Gym · 4×/week · since 2026-09-14
 ### Small on purpose
 
 No database, no sync, no telemetry, no async runtime, no plugin API. Nine direct dependencies, all
-mainstream. `cargo build --release` produces a single ~1.8 MB binary.
+mainstream. `cargo build --release` produces a single ~2 MB binary.
 
 ## Installation
-
-Every release lists what changed and which package assets it carries; the instructions for all of
-them live here.
 
 macOS, with [Homebrew](https://brew.sh):
 
@@ -527,8 +533,8 @@ If Monday and Wednesday are done, the streak is 2 and today's marker is `·` (no
 and `space` on Friday is still allowed as extra credit.
 
 **4×/week habit with three sessions so far this week.** The week is not counted in the streak yet,
-but it does not break it either — the sidebar shows `3/4 this week` and the streak stays at its
-previous value until the week closes.
+but it does not break it either — the list shows `3/4 wk` and the streak stays at its previous
+value until the week closes.
 
 **A habit created today.** The heatmap and dot strip show the previous days as not due (`·`), not
 as failures.
@@ -689,14 +695,14 @@ several widths and in the overlays.
 
 ## Roadmap
 
-`0.2.0` ships all six features that were planned for this release: start/end dates, monthly cheat
-days, notes, tags and filtering, a detail-pane trend graph, and the visual/theming pass.
-**[ROADMAP.md](ROADMAP.md)** keeps the original design notes and decisions.
+`0.2.0` shipped the six features planned for it — start/end dates, monthly cheat days, notes, tags
+and filtering, a detail-pane trend graph and the visual/theming pass. Later releases added dated
+notes, the Tags tab and tag rename/merge; the trend line itself went away in `0.3.0`, leaving the
+adaptive heatmap. **[ROADMAP.md](ROADMAP.md)** keeps the original design notes and decisions.
 
 Ideas still on the table, roughly in order:
 
 - A quota bar chart and richer multi-tag views.
-- Tag rename/merge to stop typo sprawl.
 - Opt-in OS-native reminders (`launchd`/`systemd`), never an in-app daemon.
 - Import/export helpers (CSV, old `data.json`) and a monthly HTML report.
 - Windows CI.

@@ -16,7 +16,7 @@ Six requested features, plus the items carried over from 0.1.0.
 | 1 | Start and end dates | M | shipped |
 | 2 | Cheat days (one per month) | L | shipped |
 | 3 | Notes | S | shipped (per-habit in 0.2.0; per-day in 0.3.0) |
-| 4 | Tags and tag filtering | M | shipped |
+| 4 | Tags and tag filtering | M | shipped (rename/merge in 0.5.0) |
 | 5 | Graph in the detail pane | M | shipped in 0.2.0; sparkline removed in 0.3.0 |
 | 6 | A genuinely beautiful UI | L | shipped (seven palettes, square borders) |
 
@@ -147,7 +147,7 @@ journal without turning the app into a journal app.
 ## 4. Tags and tag filtering
 
 **Shipped in 0.2.0.** Tags are normalised, sorted, rendered as chips and accepted as `#tag` in the
-filter. Filtering is AND-only; OR syntax and rename/merge are still open.
+filter. Filtering is AND-only; OR syntax is still open. Rename/merge shipped in 0.5.0.
 
 **Data**
 
@@ -166,7 +166,14 @@ from JSON when empty, like `note` and `archived`.
 **Open**
 
 - OR filtering (`#a|#b`) if the parser can stay simple.
-- Tag rename/merge (`habit tag --rename old new`) to stop typo sprawl becoming permanent.
+
+**Shipped in 0.5.0 — rename and merge**
+
+`e` on the Tags list opens a prompt for the tag under the cursor; `habit rename-tag old new` does
+the same from the shell. Renaming onto a name that already exists merges the two, asking first in
+the TUI. `habit merge-tags from into` is the careful spelling: it refuses a target that is not a
+tag, so a typo cannot create one. Not the sketched `habit tag --rename old new`, because that
+overloads `habit tag`, whose arguments are a habit followed by tags.
 
 ---
 
@@ -244,7 +251,6 @@ beyond palette tables.
 ## Carried over from 0.1.x
 
 - A quota bar chart and richer multi-tag views.
-- Tag rename/merge.
 - Optional reminders/notifications — fights the "no daemon" design, so it would be opt-in and
   OS-native (`launchd`/`systemd`), not an in-app loop.
 - Import/export helpers (CSV, and reading a previous `data.json`) and a monthly HTML report.
