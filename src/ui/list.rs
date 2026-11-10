@@ -277,7 +277,13 @@ fn highlight(theme: Theme) -> Style {
             .bg(surface)
             .fg(theme.fg)
             .add_modifier(Modifier::BOLD),
-        None => Style::default().add_modifier(Modifier::BOLD | Modifier::REVERSED),
+        // Palettes without a background are inverted instead, and the colour has
+        // to be pinned here too: otherwise every span keeps its own colour and
+        // the status dots show up as blocks of green, amber and red on the
+        // selected row, unlike every other theme.
+        None => Style::default()
+            .fg(theme.fg)
+            .add_modifier(Modifier::BOLD | Modifier::REVERSED),
     }
 }
 

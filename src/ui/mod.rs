@@ -318,16 +318,57 @@ mod tests {
     }
 
     fn render(app: &mut App, width: u16, height: u16) -> String {
-        let backend = TestBackend::new(width, height);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|frame| draw(frame, app)).unwrap();
-        terminal
-            .backend()
-            .buffer()
+        buffer(app, width, height)
             .content()
             .iter()
             .map(|cell| cell.symbol())
             .collect()
+    }
+
+    fn buffer(app: &mut App, width: u16, height: u16) -> ratatui::buffer::Buffer {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| draw(frame, app)).unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    #[test]
+    fn selected_row_is_one_colour_in_every_theme() {
+        use crate::theme::{ColorMode, ThemeName};
+
+        for name in ThemeName::ALL {
+            for mode in [ColorMode::Dark, ColorMode::Light] {
+                let mut config = Config::default();
+                config.theme = name;
+                config.mode = mode;
+                let dir = tempfile::tempdir().unwrap();
+                let store = Store::resolve(Some(dir.path().join("data.json"))).unwrap();
+                let mut data = Data::default();
+                let first = data.add_habit("Gym", Schedule::Daily, date()).unwrap();
+                let id = data.habits[first].id.clone();
+                data.log.set(date(), &id, true);
+                data.add_habit("Read", Schedule::Daily, date()).unwrap();
+                let mut app = App::new(store, data, date(), &config);
+
+                let buffer = buffer(&mut app, 100, 20);
+                let selected = (0..20u16)
+                    .find(|y| (0..100u16).any(|x| buffer[(x, *y)].symbol() == "▸"))
+                    .unwrap_or_else(|| panic!("{}/{mode:?}: no selected row", name.label()));
+
+                // Every cell inside the pane's border, so the marker, the name,
+                // the schedule and the status dots all have to agree.
+                let colours: std::collections::BTreeSet<_> = (1..45u16)
+                    .map(|x| format!("{:?}", buffer[(x, selected)].fg))
+                    .collect();
+                assert_eq!(
+                    colours.len(),
+                    1,
+                    "{}/{} paints the selected row in {colours:?}",
+                    name.label(),
+                    mode.label()
+                );
+            }
+        }
     }
 
     #[test]

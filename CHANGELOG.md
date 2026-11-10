@@ -6,17 +6,17 @@ All notable changes to `habit` are recorded here. The format follows
 
 ## [Unreleased]
 
-### Packaging
+Nothing yet.
 
-- **A one-line Linux installer.** `install.sh` (also published as a release asset) resolves the
-  latest tag, downloads the right asset, verifies it against the release's `SHA256SUMS` and then
-  installs the native `.deb` / `.rpm` / `.pkg.tar.zst` with `apt-get`, `dnf` or `pacman`, falling
-  back to the static binary in `~/.local/bin` on other distributions or without root. `--version`,
-  `--package`, `--static`, `--prefix`, `--dry-run` and `--yes` control it.
-- **A Homebrew tap** at [Vulkan1125/homebrew-tap](https://github.com/Vulkan1125/homebrew-tap):
-  `brew install Vulkan1125/tap/habit` installs the universal macOS binary, so nothing is compiled.
-- CI runs `shellcheck` on the installer, and every release now attaches `install.sh` alongside the
-  packages, with `SHA256SUMS` covering it too.
+## [0.4.1] — 2026-11-10
+
+### Fixed
+
+- **The selected row looked different in the `terminal` theme.** Palettes that paint a background
+  soften the cursor row to one text colour, but `terminal`, `mono` and any 256/16-colour fallback
+  invert it instead and were leaving each span's own colour alone — so the habit's status dot, the
+  miss and cheat marks and the week dots stayed green, amber and red on the selected row while
+  every other theme showed them in the row colour.
 
 ## [0.4.0] — 2026-11-10
 
@@ -36,6 +36,15 @@ All notable changes to `habit` are recorded here. The format follows
 - A `release packages` workflow now builds and attaches a Debian `.deb`, Fedora `.rpm`, Arch
   `.pkg.tar.zst`, universal macOS `.tar.gz`, static Linux `.tar.gz` and `SHA256SUMS` to each
   published GitHub release. It also runs on demand for an existing tag.
+- **A one-line Linux installer.** `install.sh` (also published as a release asset) resolves the
+  latest tag, downloads the right asset, verifies it against the release's `SHA256SUMS` and then
+  installs the native `.deb` / `.rpm` / `.pkg.tar.zst` with `apt-get`, `dnf` or `pacman`, falling
+  back to the static binary in `~/.local/bin` on other distributions or without root. `--version`,
+  `--package`, `--static`, `--prefix`, `--dry-run` and `--yes` control it.
+- **A Homebrew tap** at [Vulkan1125/homebrew-tap](https://github.com/Vulkan1125/homebrew-tap):
+  `brew install Vulkan1125/tap/habit` installs the universal macOS binary, so nothing is compiled.
+- CI runs `shellcheck` on the installer, and every release attaches `install.sh` alongside the
+  packages, with `SHA256SUMS` covering it too.
 
 ## [0.3.3] — 2026-11-10
 
@@ -203,7 +212,8 @@ First release.
   failure modes, form validation and TUI rendering via `TestBackend`.
 - CI on Linux and macOS (format, clippy, tests, MSRV 1.88) and a release profile with LTO + strip.
 
-[Unreleased]: https://github.com/Vulkan1125/habit-tracker/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Vulkan1125/habit-tracker/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.4.1
 [0.4.0]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.4.0
 [0.3.3]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.3.3
 [0.3.2]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.3.2
