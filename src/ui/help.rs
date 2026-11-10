@@ -17,7 +17,7 @@ const KEYS: &[(&str, &str)] = &[
     ("j k ↑ ↓", "move"),
     ("g G", "first / last"),
     ("tab", "switch habits / tags"),
-    ("n", "note for the selected day"),
+    ("n", "note for a chosen day"),
     ("b", "show / hide the bottom bar"),
     ("a", "add a habit"),
     ("e", "edit the selected habit"),

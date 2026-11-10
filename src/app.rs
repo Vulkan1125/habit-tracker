@@ -32,18 +32,42 @@ pub enum Mode {
     Note(NoteEntry),
 }
 
+/// Which half of the note dialog has the keyboard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoteField {
+    Date,
+    Text,
+}
+
+impl NoteField {
+    fn toggled(self) -> NoteField {
+        match self {
+            NoteField::Date => NoteField::Text,
+            NoteField::Text => NoteField::Date,
+        }
+    }
+}
+
 /// A single dated note being written for one habit.
 pub struct NoteEntry {
     pub habit_id: String,
     pub habit_name: String,
-    pub date: NaiveDate,
+    /// The habit's first day: a note cannot be dated before it.
+    pub start: NaiveDate,
+    /// Today, the latest day a note can be dated.
+    pub today: NaiveDate,
+    /// The date the note will be filed under, as `YYYY-MM-DD`.
+    pub date_input: crate::ui::form::TextInput,
     pub input: crate::ui::form::TextInput,
+    pub focus: NoteField,
+    /// Why the date in the field cannot be saved, shown in place of the hint.
+    pub error: Option<String>,
 }
 
 pub enum NoteAction {
     Continue,
     Cancel,
-    Save(String),
+    Save { date: NaiveDate, text: String },
 }
 
 impl NoteEntry {
@@ -53,40 +77,94 @@ impl NoteEntry {
         }
         match key.code {
             KeyCode::Esc => NoteAction::Cancel,
-            KeyCode::Enter => NoteAction::Save(self.input.text()),
-            KeyCode::Backspace => {
-                self.input.backspace();
+            KeyCode::Tab | KeyCode::BackTab => {
+                self.focus = self.focus.toggled();
+                self.error = None;
                 NoteAction::Continue
             }
-            KeyCode::Delete => {
-                self.input.delete();
+            KeyCode::Enter => match self.resolve_date() {
+                Ok(date) => NoteAction::Save {
+                    date,
+                    text: self.input.text(),
+                },
+                Err(message) => {
+                    self.error = Some(message);
+                    self.focus = NoteField::Date;
+                    NoteAction::Continue
+                }
+            },
+            _ => {
+                self.edit(key);
                 NoteAction::Continue
             }
-            KeyCode::Left => {
-                self.input.left();
-                NoteAction::Continue
-            }
-            KeyCode::Right => {
-                self.input.right();
-                NoteAction::Continue
-            }
-            KeyCode::Home => {
-                self.input.home();
-                NoteAction::Continue
-            }
-            KeyCode::End => {
-                self.input.end();
-                NoteAction::Continue
-            }
-            KeyCode::Char(character)
-                if !key.modifiers.contains(KeyModifiers::CONTROL)
-                    && !key.modifiers.contains(KeyModifiers::ALT) =>
-            {
-                self.input.insert(character);
-                NoteAction::Continue
-            }
-            _ => NoteAction::Continue,
         }
+    }
+
+    fn edit(&mut self, key: KeyEvent) {
+        match self.focus {
+            NoteField::Date => match key.code {
+                KeyCode::Up => self.nudge_date(-1),
+                KeyCode::Down => self.nudge_date(1),
+                _ => {
+                    if !matches!(
+                        key.code,
+                        KeyCode::Left | KeyCode::Right | KeyCode::Home | KeyCode::End
+                    ) {
+                        self.error = None;
+                    }
+                    edit_input(&mut self.date_input, key);
+                }
+            },
+            NoteField::Text => edit_input(&mut self.input, key),
+        }
+    }
+
+    /// The date in the field, or today when it does not parse.
+    pub fn date(&self) -> NaiveDate {
+        parse_date(&self.date_input.text()).unwrap_or(self.today)
+    }
+
+    fn nudge_date(&mut self, delta: i64) {
+        let moved = self.date() + chrono::Duration::days(delta);
+        self.date_input.set(&moved.format("%Y-%m-%d").to_string());
+        self.error = None;
+    }
+
+    /// The date the note may be saved under, or why it may not.
+    fn resolve_date(&self) -> std::result::Result<NaiveDate, String> {
+        let raw = self.date_input.text().trim().to_string();
+        let Some(date) = parse_date(&raw) else {
+            return Err(format!("`{raw}` is not a date · use YYYY-MM-DD"));
+        };
+        if date > self.today {
+            return Err(format!("{} is in the future", date.format("%Y-%m-%d")));
+        }
+        if date < self.start {
+            return Err(format!(
+                "the habit starts {}",
+                self.start.format("%Y-%m-%d")
+            ));
+        }
+        Ok(date)
+    }
+}
+
+/// Cursor movement and typing, shared by the date and note fields.
+fn edit_input(input: &mut crate::ui::form::TextInput, key: KeyEvent) {
+    match key.code {
+        KeyCode::Backspace => input.backspace(),
+        KeyCode::Delete => input.delete(),
+        KeyCode::Left => input.left(),
+        KeyCode::Right => input.right(),
+        KeyCode::Home => input.home(),
+        KeyCode::End => input.end(),
+        KeyCode::Char(character)
+            if !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT) =>
+        {
+            input.insert(character);
+        }
+        _ => {}
     }
 }
 
@@ -300,29 +378,34 @@ impl App {
             self.flash_err("select a habit first");
             return;
         };
-        if self.view_date > self.today {
-            self.flash_err("cannot write a note for a future day");
-            return;
-        }
+        // Defaults to the day on screen, which is today unless the user moved
+        // with `[` / `]`, and never earlier than the habit itself.
+        let default = self.view_date.max(habit.created);
+        let mut date_input = crate::ui::form::TextInput::with_limit(10);
+        date_input.set(&default.format("%Y-%m-%d").to_string());
         let mut input = crate::ui::form::TextInput::with_limit(400);
-        if let Some(existing) = habit.note_on(self.view_date) {
+        if let Some(existing) = habit.note_on(default) {
             input.set(existing);
         }
         self.mode = Mode::Note(NoteEntry {
             habit_id: habit.id.clone(),
             habit_name: habit.name.clone(),
-            date: self.view_date,
+            start: habit.created,
+            today: self.today,
+            date_input,
             input,
+            focus: NoteField::Text,
+            error: None,
         });
     }
 
-    fn save_note(&mut self, entry: NoteEntry, text: String) {
+    fn save_note(&mut self, entry: NoteEntry, date: NaiveDate, text: String) {
         let existing = self
             .data
             .habits
             .iter()
             .find(|habit| habit.id == entry.habit_id)
-            .and_then(|habit| habit.note_on(entry.date))
+            .and_then(|habit| habit.note_on(date))
             .unwrap_or("")
             .to_string();
         if existing == text.trim() {
@@ -330,7 +413,6 @@ impl App {
             return;
         }
         let id = entry.habit_id.clone();
-        let date = entry.date;
         let text_owned = text.clone();
         self.mutate(move |data| {
             if let Some(habit) = data.habits.iter_mut().find(|habit| habit.id == id) {
@@ -449,7 +531,7 @@ impl App {
                 match entry.handle_key(key) {
                     NoteAction::Continue => self.mode = Mode::Note(entry),
                     NoteAction::Cancel => {}
-                    NoteAction::Save(text) => self.save_note(entry, text),
+                    NoteAction::Save { date, text } => self.save_note(entry, date, text),
                 }
                 Ok(())
             }
@@ -1173,12 +1255,115 @@ mod tests {
             panic!("expected note mode");
         };
         assert_eq!(entry.input.text(), "tired");
+        assert_eq!(entry.date_input.text(), "2026-11-09");
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
             .unwrap();
         assert_eq!(
             app.data.habits[0].note_on(date("2026-11-09")),
             Some("tired")
         );
+    }
+
+    /// Focus the date field, clear it and type a new date.
+    fn set_note_date(app: &mut App, text: &str) {
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+            .unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE))
+            .unwrap();
+        for _ in 0..12 {
+            app.handle_key(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE))
+                .unwrap();
+        }
+        for character in text.chars() {
+            app.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE))
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn a_note_can_be_written_for_another_day_from_the_dialog() {
+        let mut app = app();
+        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE))
+            .unwrap();
+        set_note_date(&mut app, "2026-11-03");
+        // Tab back to the note text, write it and save.
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+            .unwrap();
+        for character in "backfilled".chars() {
+            app.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE))
+                .unwrap();
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap();
+        assert!(matches!(app.mode, Mode::Normal));
+        assert_eq!(
+            app.data.habits[0].note_on(date("2026-11-03")),
+            Some("backfilled")
+        );
+        assert!(!app.data.habits[0].notes.contains_key(&date("2026-11-10")));
+    }
+
+    #[test]
+    fn arrow_keys_walk_the_note_date_one_day_at_a_time() {
+        let mut app = app();
+        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE))
+            .unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+            .unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))
+            .unwrap();
+        let Mode::Note(entry) = &app.mode else {
+            panic!("expected note mode");
+        };
+        assert_eq!(entry.date_input.text(), "2026-11-09");
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+            .unwrap();
+        let Mode::Note(entry) = &app.mode else {
+            panic!("expected note mode");
+        };
+        assert_eq!(entry.date_input.text(), "2026-11-10");
+    }
+
+    #[test]
+    fn a_note_dated_in_the_future_is_refused() {
+        let mut app = app();
+        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE))
+            .unwrap();
+        set_note_date(&mut app, "2026-11-11");
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap();
+        let Mode::Note(entry) = &app.mode else {
+            panic!("the dialog should stay open");
+        };
+        assert!(
+            entry.error.as_deref().unwrap_or("").contains("future"),
+            "{:?}",
+            entry.error
+        );
+        assert!(app.data.habits[0].notes.is_empty());
+    }
+
+    #[test]
+    fn a_note_dated_before_the_habit_started_is_refused() {
+        let mut app = app();
+        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE))
+            .unwrap();
+        set_note_date(&mut app, "2026-10-31");
+        for character in "too early".chars() {
+            app.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE))
+                .unwrap();
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap();
+        let Mode::Note(entry) = &app.mode else {
+            panic!("the dialog should stay open");
+        };
+        assert!(
+            entry.error.as_deref().unwrap_or("").contains("2026-11-01"),
+            "{:?}",
+            entry.error
+        );
+        assert!(app.data.habits[0].notes.is_empty());
     }
 
     #[test]

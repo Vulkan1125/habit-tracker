@@ -133,9 +133,13 @@ description for compatibility.
 
 In the TUI, `tab` switches the left pane between **Habits** and **Tags**. The tag list shows each
 tag with its count of still-active habits; open a tag with `enter`, `space` or a click to see its
-active habits and, under an **Archive** heading, the archived or finished ones. Press `n` on any
-past or present day to write or edit that day's note — right after checking a habit off is the
-natural moment. Dates are shown on the left, notes on the right.
+active habits and, under an **Archive** heading, the archived or finished ones. Press `n` to write
+or edit a note — right after checking a habit off is the natural moment. The dialog opens on the
+day you are looking at (today unless you moved with `[` / `]`), and `tab` moves into its date field
+if you want another day: `↑` / `↓` step one day and typing takes any `YYYY-MM-DD`. A date in the
+future or before the habit started is refused with an inline message and the dialog stays open;
+`esc` cancels, and saving an empty note removes it. Dates are shown on the left, notes on the
+right, newest first.
 
 ```
  habit  Tue 10 Nov 2026                                                            █████░ 3/4 today
@@ -177,8 +181,9 @@ and description. Multiple tokens are ANDed, so `run #morning` narrows to morning
 - **Detail pane** with `description:` directly under the habit title, and the description text,
   schedule line and tags all indented beneath it, then current and best streak, this week's bar,
   30-day completion, an adaptive heatmap (up to 52 weeks) and dated notes (date left, note right).
-- **Dated notes**: press `n` after checking a habit off to journal the day; empty input removes the
-  note and edits are covered by undo.
+- **Dated notes**, newest first: press `n` after checking a habit off to journal the day, or `tab`
+  inside the dialog to file it under another date (never the future, never before the habit's
+  start); empty input removes the note and edits are covered by undo.
 - **Hideable bottom bar**: `b` reclaims the hint line and gives the panes one more row.
 - **Add/edit dialog** with schedule picker, weekday toggles, start/end dates, tags and description —
   all validated inline.
@@ -340,7 +345,7 @@ Nothing else to configure. The data file is created on the first change.
 | --- | --- |
 | `space` | check off / un-check the selected day (`n` then adds a note) |
 | `tab` | switch the left pane between Habits and Tags |
-| `n` | write or edit the selected day's note |
+| `n` | write or edit a note; the dialog's date field can move it to any past day |
 | `b` | show or hide the bottom bar |
 | `c` | toggle a cheat day on the selected day |
 | `[` `]` | move the selected day back / forward (never into the future) |
@@ -393,7 +398,7 @@ selection, weekly quota, start date, end date, tags and description.
 │                                                  │
 │space       check off / undo the selected day     │
 │tab         switch habits / tags                  │
-│n           note for the selected day             │
+│n           note for a chosen day                 │
 │b           show / hide the bottom bar            │
 │c           cheat day (one per month)             │
 │[ ]         previous / next day                   │
@@ -626,7 +631,7 @@ A few decisions worth knowing:
 ## Development
 
 ```sh
-cargo test                                  # 133 tests
+cargo test                                  # 139 tests
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 cargo build --release

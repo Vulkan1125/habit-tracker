@@ -6,6 +6,17 @@ All notable changes to `habit` are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **The note dialog takes a date.** `n` opens it on the day you are looking at, and `tab` moves
+  into a `YYYY-MM-DD` date field: `↑` / `↓` step one day, or type any date. Dates in the future and
+  dates before the habit's start are refused with an inline message while the dialog stays open.
+
+### Changed
+
+- Dated notes are always listed **newest first** in the detail pane, so the latest entry stays at
+  the top.
+
 ### Packaging
 
 - A `release packages` workflow now builds and attaches a Debian `.deb`, Fedora `.rpm`, Arch

@@ -144,7 +144,7 @@ fn hint(app: &App, max_width: usize) -> String {
         Mode::Help => "press any key to close help".to_string(),
         Mode::Form(_) => "tab next · enter save · esc cancel".to_string(),
         Mode::Confirm(_) => "y confirm · n cancel".to_string(),
-        Mode::Note(_) => "enter save · esc cancel · empty clears the note".to_string(),
+        Mode::Note(_) => "tab date/note · ↑↓ day · enter save · esc cancel".to_string(),
         Mode::Normal if app.filtering => {
             "type to filter · #tag for tags · enter keep · esc clear".to_string()
         }
@@ -167,8 +167,10 @@ fn hint(app: &App, max_width: usize) -> String {
 }
 
 fn note_overlay(frame: &mut Frame, area: Rect, theme: &Theme, entry: &crate::app::NoteEntry) {
+    use crate::app::NoteField;
+
     let width = area.width.saturating_sub(4).clamp(34, 68);
-    let height = 6.min(area.height);
+    let height = 7.min(area.height);
     let popup = Rect {
         x: area.x + area.width.saturating_sub(width) / 2,
         y: area.y + area.height.saturating_sub(height) / 2,
@@ -176,38 +178,72 @@ fn note_overlay(frame: &mut Frame, area: Rect, theme: &Theme, entry: &crate::app
         height,
     };
     frame.render_widget(Clear, popup);
-    let title = format!(
-        " Note · {} · {} ",
-        truncate(&entry.habit_name, 24),
-        entry.date.format("%a %-d %b")
-    );
+    let title = format!(" Note · {} ", truncate(&entry.habit_name, 30));
+    let border = if entry.error.is_some() {
+        theme.missed
+    } else {
+        theme.accent
+    };
     let block = Block::bordered()
         .title(title)
-        .border_style(Style::default().fg(theme.accent))
+        .border_style(Style::default().fg(border))
         .style(theme.base());
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
 
-    let mut text: Vec<char> = entry.input.text().chars().collect();
-    let cursor = entry.input.cursor().min(text.len());
-    text.insert(cursor, '▏');
-    let input: String = text.into_iter().collect();
+    let date_focused = entry.focus == NoteField::Date;
     let room = inner.width as usize;
+    let date_line = Line::from(vec![
+        Span::styled("date  ", Style::default().fg(theme.dim)),
+        Span::styled(
+            truncate(
+                &field_text(&entry.date_input, date_focused),
+                room.saturating_sub(6),
+            ),
+            Style::default().fg(if date_focused { theme.fg } else { theme.dim }),
+        ),
+    ]);
+    let note_line = Line::from(vec![
+        Span::styled("note  ", Style::default().fg(theme.dim)),
+        Span::styled(
+            truncate(
+                &field_text(&entry.input, !date_focused),
+                room.saturating_sub(6),
+            ),
+            Style::default().fg(if date_focused { theme.dim } else { theme.fg }),
+        ),
+    ]);
+    let tail = match &entry.error {
+        Some(message) => Line::from(Span::styled(
+            truncate(message, room),
+            Style::default().fg(theme.missed),
+        )),
+        None => Line::from(Span::styled(
+            truncate("tab date/note · ↑↓ day · enter save · esc cancel", room),
+            Style::default().fg(theme.dim),
+        )),
+    };
     frame.render_widget(
         Paragraph::new(vec![
-            Line::from(Span::styled(
-                truncate(&input, room),
-                Style::default().fg(theme.fg),
-            )),
+            date_line,
             Line::raw(""),
-            Line::from(Span::styled(
-                truncate("enter save · esc cancel · empty removes", room),
-                Style::default().fg(theme.dim),
-            )),
+            note_line,
+            Line::raw(""),
+            tail,
         ])
         .style(theme.base()),
         inner,
     );
+}
+
+/// The field's text with a visible caret when it has the keyboard.
+fn field_text(input: &crate::ui::form::TextInput, focused: bool) -> String {
+    let mut text: Vec<char> = input.text().chars().collect();
+    if focused {
+        let cursor = input.cursor().min(text.len());
+        text.insert(cursor, '▏');
+    }
+    text.into_iter().collect()
 }
 
 fn confirm_overlay(frame: &mut Frame, area: Rect, theme: &Theme, prompt: &str) {
@@ -353,7 +389,40 @@ mod tests {
         .unwrap();
         let screen = render(&mut app, 90, 30);
         assert!(screen.contains("Note · Gym"), "{screen}");
-        assert!(screen.contains("enter save"), "{screen}");
+        assert!(screen.contains("date  2026-11-10"), "{screen}");
+        assert!(screen.contains("tab date/note"), "{screen}");
+    }
+
+    #[test]
+    fn a_bad_note_date_is_shown_in_the_overlay() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut app = app_with("Gym");
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        app.handle_key(key(KeyCode::Char('n'))).unwrap();
+        app.handle_key(key(KeyCode::Tab)).unwrap();
+        app.handle_key(key(KeyCode::Home)).unwrap();
+        for _ in 0..12 {
+            app.handle_key(key(KeyCode::Delete)).unwrap();
+        }
+        for character in "2026-12-01".chars() {
+            app.handle_key(key(KeyCode::Char(character))).unwrap();
+        }
+        app.handle_key(key(KeyCode::Enter)).unwrap();
+        let screen = render(&mut app, 90, 30);
+        assert!(screen.contains("is in the future"), "{screen}");
+    }
+
+    #[test]
+    fn notes_are_listed_newest_first() {
+        let mut app = app_with("Gym");
+        app.data.habits[0].set_note(date(), "newest entry");
+        app.data.habits[0].set_note(date() - chrono::Duration::days(1), "older entry");
+        app.data.habits[0].set_note(date() - chrono::Duration::days(2), "oldest entry");
+        let screen = render(&mut app, 90, 40);
+        let newest = screen.find("newest entry").expect("newest note");
+        let older = screen.find("older entry").expect("older note");
+        let oldest = screen.find("oldest entry").expect("oldest note");
+        assert!(newest < older && older < oldest, "{screen}");
     }
 
     #[test]
