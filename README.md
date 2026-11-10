@@ -419,13 +419,19 @@ week boundaries and quota weeks, schedule compliance, JSON round-trips, atomic-s
 
 ## Roadmap
 
-Deliberately not included in 0.1.0, roughly in priority order:
+Planned, roughly in build order — see **[ROADMAP.md](ROADMAP.md)** for the design sketch and open
+questions behind each one:
 
-- Backfilling days from inside the TUI (CLI `--date` works today).
-- Editing per-habit notes in the TUI (the field and rendering already exist).
-- Optional reminders/notifications — fights the “no daemon” design, so it would be opt-in.
-- Import/export helpers and a monthly HTML report.
-- Windows CI.
+- Start and end dates for habits.
+- Cheat days: one excused day per month, shown in its own colour, that does not break the streak —
+  a second one in the same month does.
+- Notes, per habit and (optionally) per day.
+- Tags, with tag facets and `#tag` filtering.
+- A trend graph in the detail pane, alongside the existing heatmap.
+- A real visual design pass, with truecolour detection and per-habit accents.
+
+Carried over: backfilling from inside the TUI, opt-in OS-native reminders, import/export helpers,
+Windows CI. Not planned: accounts, sync, telemetry, plugins, a server.
 
 ## License
 
