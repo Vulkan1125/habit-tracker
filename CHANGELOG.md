@@ -6,6 +6,10 @@ All notable changes to `habit` are recorded here. The format follows
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.4.0] — 2026-11-10
+
 ### Added
 
 - **The note dialog takes a date.** `n` opens it on the day you are looking at, and `tab` moves
@@ -189,7 +193,8 @@ First release.
   failure modes, form validation and TUI rendering via `TestBackend`.
 - CI on Linux and macOS (format, clippy, tests, MSRV 1.88) and a release profile with LTO + strip.
 
-[Unreleased]: https://github.com/Vulkan1125/habit-tracker/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/Vulkan1125/habit-tracker/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.4.0
 [0.3.3]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.3.3
 [0.3.2]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.3.2
 [0.3.1]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.3.1
