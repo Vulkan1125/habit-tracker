@@ -244,14 +244,16 @@ jobs:
     needs: [linux, macos, deb, rpm, arch]
     runs-on: ubuntu-latest
     steps:
+      # Checkout has to come first: it cleans untracked files by default, which
+      # would delete the artifacts if they were downloaded before it.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
-
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.release.tag_name || inputs.tag }}
 
       - name: Add the installer
         run: cp install.sh dist/install.sh
