@@ -6,7 +6,15 @@ All notable changes to `habit` are recorded here. The format follows
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **`b` hides the bottom bar**, giving the panes one more row; pressing it again restores the
+  hint line. The toggle works from the habit list, the tag list and a tag view.
+
+### Changed
+
+- The habit **description** now sits directly under the title in the detail pane instead of at the
+  bottom, followed by the schedule, tags, streak, heatmap and dated notes.
 
 ## [0.3.0] — 2026-11-10
 

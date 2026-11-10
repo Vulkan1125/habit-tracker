@@ -23,10 +23,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         frame.render_widget(Block::default().style(Style::default().bg(bg)), area);
     }
 
+    let footer_height = if app.show_footer { 1 } else { 0 };
     let rows = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(3),
-        Constraint::Length(1),
+        Constraint::Length(footer_height),
     ])
     .split(area);
 
@@ -41,7 +42,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         list::draw(frame, rows[1], app);
     }
 
-    footer(frame, rows[2], app);
+    if app.show_footer {
+        footer(frame, rows[2], app);
+    }
 
     match &app.mode {
         Mode::Normal => {}
@@ -146,19 +149,19 @@ fn hint(app: &App, max_width: usize) -> String {
             "type to filter · #tag for tags · enter keep · esc clear".to_string()
         }
         Mode::Normal => {
-            let full = "space toggle · n note · c cheat · [ ] day · t today · tab tags · a add · e edit · d archive · x delete · u undo · / filter · T theme · m mode · ? help · q quit";
+            let full = "space toggle · n note · c cheat · [ ] day · t today · tab tags · a add · e edit · d archive · x delete · u undo · / filter · b bar · T theme · m mode · ? help · q quit";
             if width(full) <= max_width {
                 return full.to_string();
             }
-            let medium = "space toggle · n note · tab tags · / filter · ? help · q quit";
+            let medium = "space toggle · n note · tab tags · b bar · / filter · ? help · q quit";
             if width(medium) <= max_width {
                 return medium.to_string();
             }
-            let tiny = "space · n · tab · / · ? · q";
+            let tiny = "space · n · tab · b · / · ? · q";
             if width(tiny) <= max_width {
                 return tiny.to_string();
             }
-            "space · n · / · ? · q".to_string()
+            "space · n · b · / · ? · q".to_string()
         }
     }
 }
@@ -375,6 +378,33 @@ mod tests {
         let screen = render(&mut app, 90, 30);
         assert!(screen.contains("Keys"), "{screen}");
         assert!(screen.contains("cheat"), "{screen}");
+    }
+
+    #[test]
+    fn description_sits_directly_under_the_habit_title() {
+        let mut app = app_with("Gym");
+        app.data.habits[0].note = Some("ten minutes is enough".into());
+        let screen = render(&mut app, 90, 34);
+        let description = screen.find("description").expect("description heading");
+        let title = screen.find("Gym").expect("habit title");
+        let schedule = screen.find("daily · since").expect("schedule line");
+        assert!(title < description && description < schedule, "{screen}");
+        assert_eq!(screen.matches("description").count(), 1, "{screen}");
+    }
+
+    #[test]
+    fn the_bottom_bar_can_be_hidden_and_restored() {
+        let mut app = app_with("Gym");
+        let screen = render(&mut app, 90, 30);
+        assert!(screen.contains("? help"), "{screen}");
+
+        app.show_footer = false;
+        let screen = render(&mut app, 90, 30);
+        assert!(!screen.contains("? help"), "{screen}");
+
+        app.show_footer = true;
+        let screen = render(&mut app, 90, 30);
+        assert!(screen.contains("? help"), "{screen}");
     }
 
     #[test]

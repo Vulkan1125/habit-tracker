@@ -47,6 +47,19 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     }
     lines.push(Line::from(title));
 
+    if let Some(note) = &habit.note {
+        lines.push(Line::from(Span::styled(
+            "description",
+            Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
+        )));
+        for chunk in wrap(note, inner_width, 3) {
+            lines.push(Line::from(Span::styled(
+                chunk,
+                Style::default().fg(theme.fg),
+            )));
+        }
+    }
+
     let mut subtitle = vec![Span::styled(
         habit.schedule.describe(),
         Style::default().fg(theme.dim),
@@ -197,20 +210,6 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             lines.push(Line::from(Span::styled(
                 format!("… {remaining} older"),
                 Style::default().fg(theme.dim),
-            )));
-        }
-    }
-
-    if let Some(note) = &habit.note {
-        lines.push(Line::raw(""));
-        lines.push(Line::from(Span::styled(
-            "description",
-            Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
-        )));
-        for chunk in wrap(note, inner_width, 3) {
-            lines.push(Line::from(Span::styled(
-                chunk,
-                Style::default().fg(theme.fg),
             )));
         }
     }

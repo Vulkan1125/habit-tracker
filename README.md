@@ -12,11 +12,13 @@ binary with no daemon, no account and no network access.
  habit  Tue 10 Nov 2026                                                            █████░ 3/4 today
 ┌────────────────────────────────────────────┐┌ Details ───────────────────────────────────────────┐
 │ Habits 4   Tags 4                          ││Morning run                                         │
-│▸ ● Morning run         daily        ○●◆○●●●││daily · since 2026-01-01                            │
-│  ● Read 20 pages       Mon–Fri      ●●●··●●││#health #morning                                    │
-│  ○ Strength            1/3 wk       ●·●··●·││                                                    │
-│  ● Meditate            daily        ●●●●●●●││streak     3 days   best 10 days                    │
-│  · Evening walk        daily        ○●●●●○◌││this week  ██████████  2/2                          │
+│▸ ● Morning run         daily        ○●◆○●●●││description                                         │
+│  ● Read 20 pages       Mon–Fri      ●●●··●●││5k before breakfast                                 │
+│  ○ Strength            1/3 wk       ●·●··●·││daily · since 2026-01-01                            │
+│  ● Meditate            daily        ●●●●●●●││#health #morning                                    │
+│  · Evening walk        daily        ○●●●●○◌││                                                    │
+│                                            ││streak     3 days   best 10 days                    │
+│                                            ││this week  ██████████  2/2                          │
 │                                            ││last 30d   █████████░  85% (24 of 28)               │
 │                                            ││                                                    │
 │                                            ││Mon ·████░██████████░██████████░██████████░███████  │
@@ -34,12 +36,8 @@ binary with no daemon, no account and no network access.
 │                                            ││2026-11-10 easy recovery run after yesterday        │
 │                                            ││2026-11-09 legs heavy but went anyway               │
 │                                            ││2026-11-08 felt strong, 5k in 26:30                 │
-│                                            ││                                                    │
-│                                            ││description                                         │
-│                                            ││5k before breakfast                                 │
-│                                            ││                                                    │
 └────────────────────────────────────────────┘└────────────────────────────────────────────────────┘
-space toggle · n note · tab tags · / filter · ? help · q quit
+space toggle · n note · tab tags · b bar · / filter · ? help · q quit
 ```
 
 *(Colour is stripped in this capture. The real thing has seven palettes in light and dark mode and
@@ -142,11 +140,13 @@ natural moment. Dates are shown on the left, notes on the right.
  habit  Tue 10 Nov 2026                                                            █████░ 3/4 today
 ┌────────────────────────────────────────────┐┌ Details ───────────────────────────────────────────┐
 │ Habits 4   Tags 4                          ││Morning run                                         │
-│ ‹ all tags   #health · 2 active            ││daily · since 2026-01-01                            │
-│▸ ● Morning run         daily        ○●◆○●●●││#health #morning                                    │
-│  ○ Strength            1/3 wk       ●·●··●·││                                                    │
-│   Archive                                  ││streak     3 days   best 10 days                    │
-│  · Evening walk        daily        ○●●●●○◌││this week  ██████████  2/2                          │
+│ ‹ all tags   #health · 2 active            ││description                                         │
+│▸ ● Morning run         daily        ○●◆○●●●││5k before breakfast                                 │
+│  ○ Strength            1/3 wk       ●·●··●·││daily · since 2026-01-01                            │
+│   Archive                                  ││#health #morning                                    │
+│  · Evening walk        daily        ○●●●●○◌││                                                    │
+│                                            ││streak     3 days   best 10 days                    │
+│                                            ││this week  ██████████  2/2                          │
 │                                            ││last 30d   █████████░  85% (24 of 28)               │
 │                                            ││                                                    │
 │                                            ││Mon ·████░██████████░██████████░██████████░███████  │
@@ -157,10 +157,8 @@ natural moment. Dates are shown on the left, notes on the right.
 │                                            ││Sat █████████░░█████████░██████████░██████████░█░   │
 │                                            ││Sun █░████████░█░██████████░██████████░██████████   │
 │                                            ││                                                    │
-│                                            ││● done  ◆ cheat  ░ missed  ◌ open  · not due        │
-│                                            ││282 check-ins  ◆ 2 cheat this Nov                   │
 └────────────────────────────────────────────┘└────────────────────────────────────────────────────┘
-space toggle · n note · tab tags · / filter · ? help · q quit
+space toggle · n note · tab tags · b bar · / filter · ? help · q quit
 ```
 
 In the TUI press `/` and type. `#health` matches tags, while plain words match the name, id, tags
@@ -173,10 +171,12 @@ and description. Multiple tokens are ANDed, so `run #morning` narrows to morning
   finished ones under an **Archive** heading.
 - **Habit rows** with the selected day's marker, a 7-day dot strip and weekly quota progress.
 - **Date navigation** (`[` `]`, `t` for today): check off, excuse, inspect or annotate any past day.
-- **Detail pane** with current and best streak, this week's bar, 30-day completion, an adaptive
-  heatmap (up to 52 weeks), tags, the wrapped description and dated notes (date left, note right).
+- **Detail pane** with the description directly under the habit title, then schedule, tags,
+  current and best streak, this week's bar, 30-day completion, an adaptive heatmap (up to 52
+  weeks) and dated notes (date left, note right).
 - **Dated notes**: press `n` after checking a habit off to journal the day; empty input removes the
   note and edits are covered by undo.
+- **Hideable bottom bar**: `b` reclaims the hint line and gives the panes one more row.
 - **Add/edit dialog** with schedule picker, weekday toggles, start/end dates, tags and description —
   all validated inline.
 - **Instant feedback** in the status line, including streak effects and a warning when a second
@@ -322,6 +322,7 @@ Nothing else to configure. The data file is created on the first change.
 | `space` | check off / un-check the selected day (`n` then adds a note) |
 | `tab` | switch the left pane between Habits and Tags |
 | `n` | write or edit the selected day's note |
+| `b` | show or hide the bottom bar |
 | `c` | toggle a cheat day on the selected day |
 | `[` `]` | move the selected day back / forward (never into the future) |
 | `t` | jump back to today |
@@ -374,6 +375,7 @@ selection, weekly quota, start date, end date, tags and description.
 │space       check off / undo the selected day     │
 │tab         switch habits / tags                  │
 │n           note for the selected day             │
+│b           show / hide the bottom bar            │
 │c           cheat day (one per month)             │
 │[ ]         previous / next day                   │
 │t           back to today                         │
@@ -605,7 +607,7 @@ A few decisions worth knowing:
 ## Development
 
 ```sh
-cargo test                                  # 129 tests
+cargo test                                  # 132 tests
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 cargo build --release

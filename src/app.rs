@@ -133,6 +133,8 @@ pub struct App {
     pub tag_focus: Option<String>,
     pub tag_cursor: usize,
     pub hits: HitAreas,
+    /// Whether the one-line hint bar at the bottom is drawn.
+    pub show_footer: bool,
     pub config: Config,
     pub theme: Theme,
     pub cursor: usize,
@@ -157,6 +159,7 @@ impl App {
             tag_focus: None,
             tag_cursor: 0,
             hits: HitAreas::default(),
+            show_footer: true,
             config: config.clone(),
             theme: config.palette(),
             cursor: 0,
@@ -487,6 +490,7 @@ impl App {
                 KeyCode::Tab
                 | KeyCode::Char('T')
                 | KeyCode::Char('m')
+                | KeyCode::Char('b')
                 | KeyCode::Char('r')
                 | KeyCode::Char('/')
                 | KeyCode::Char('?')
@@ -545,6 +549,7 @@ impl App {
             }
             KeyCode::Tab => self.next_tab(),
             KeyCode::Char('n') => self.start_note(),
+            KeyCode::Char('b') => self.show_footer = !self.show_footer,
             KeyCode::Char('T') => self.cycle_theme(),
             KeyCode::Char('m') => self.toggle_mode(),
             KeyCode::Char('r') => self.reload(),
@@ -1096,6 +1101,9 @@ mod tests {
         app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
             .unwrap();
         assert!(!app.data.log.is_done(date("2026-11-10"), "gym"));
+        app.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE))
+            .unwrap();
+        assert!(!app.show_footer);
     }
 
     #[test]
@@ -1211,6 +1219,18 @@ mod tests {
             modifiers: KeyModifiers::NONE,
         });
         assert_eq!(app.cursor, 1);
+    }
+
+    #[test]
+    fn b_toggles_the_bottom_bar() {
+        let mut app = app();
+        assert!(app.show_footer);
+        app.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE))
+            .unwrap();
+        assert!(!app.show_footer);
+        app.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE))
+            .unwrap();
+        assert!(app.show_footer);
     }
 
     #[test]
