@@ -8,6 +8,14 @@ All notable changes to `habit` are recorded here. The format follows
 
 Nothing yet.
 
+## [0.3.3] — 2026-11-10
+
+### Changed
+
+- The detail pane's `daily · since …` schedule line and tag chips are now indented to match the
+  description text, so the title is followed by one visually aligned block. Streak, heatmap, notes
+  and everything below are unchanged.
+
 ## [0.3.2] — 2026-11-10
 
 ### Added
@@ -166,7 +174,8 @@ First release.
   failure modes, form validation and TUI rendering via `TestBackend`.
 - CI on Linux and macOS (format, clippy, tests, MSRV 1.88) and a release profile with LTO + strip.
 
-[Unreleased]: https://github.com/Vulkan1125/habit-tracker/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/Vulkan1125/habit-tracker/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.3.3
 [0.3.2]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.3.2
 [0.3.1]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.3.1
 [0.3.0]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.3.0

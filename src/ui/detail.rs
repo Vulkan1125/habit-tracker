@@ -61,10 +61,10 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         }
     }
 
-    let mut subtitle = vec![Span::styled(
-        habit.schedule.describe(),
-        Style::default().fg(theme.dim),
-    )];
+    let mut subtitle = vec![
+        Span::raw("    "),
+        Span::styled(habit.schedule.describe(), Style::default().fg(theme.dim)),
+    ];
     subtitle.push(Span::styled(
         format!(" · {}", habit.window_label()),
         Style::default().fg(theme.dim),
@@ -72,7 +72,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     lines.push(Line::from(subtitle));
 
     if !habit.tags.is_empty() {
-        let mut chips = Vec::new();
+        let mut chips = vec![Span::raw("    ")];
         for tag in habit.tags.iter().take(4) {
             chips.push(Span::styled(
                 format!("#{tag} "),

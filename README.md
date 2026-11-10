@@ -14,8 +14,8 @@ binary with no daemon, no account and no network access.
 │ Habits 4   Tags 4                          ││Morning run                                         │
 │▸ ● Morning run         daily        ○●◆○●●●││description:                                        │
 │  ● Read 20 pages       51d left     ●●●··●●││    5k before breakfast                             │
-│  ○ Strength            1/3 wk       ●·●··●·││daily · since 2026-01-01                            │
-│  ● Meditate            daily        ●●●●●●●││#health #morning                                    │
+│  ○ Strength            1/3 wk       ●·●··●·││    daily · since 2026-01-01                        │
+│  ● Meditate            daily        ●●●●●●●││    #health #morning                                │
 │  · Evening walk        daily        ○●●●●○◌││                                                    │
 │                                            ││streak     3 days   best 10 days                    │
 │                                            ││this week  ██████████  2/2                          │
@@ -143,8 +143,8 @@ natural moment. Dates are shown on the left, notes on the right.
 │ Habits 4   Tags 4                          ││Morning run                                         │
 │ ‹ all tags   #health · 2 active            ││description:                                        │
 │▸ ● Morning run         daily        ○●◆○●●●││    5k before breakfast                             │
-│  ○ Strength            1/3 wk       ●·●··●·││daily · since 2026-01-01                            │
-│   Archive                                  ││#health #morning                                    │
+│  ○ Strength            1/3 wk       ●·●··●·││    daily · since 2026-01-01                        │
+│   Archive                                  ││    #health #morning                                │
 │  · Evening walk        daily        ○●●●●○◌││                                                    │
 │                                            ││streak     3 days   best 10 days                    │
 │                                            ││this week  ██████████  2/2                          │
@@ -174,9 +174,9 @@ and description. Multiple tokens are ANDed, so `run #morning` narrows to morning
   Habits with an end date replace the schedule label with a countdown (`51d left`, `last day`,
   `ended`), turning amber in the final three days.
 - **Date navigation** (`[` `]`, `t` for today): check off, excuse, inspect or annotate any past day.
-- **Detail pane** with `description:` directly under the habit title and its wrapped text indented
-  beneath it, then schedule, tags, current and best streak, this week's bar, 30-day completion, an
-  adaptive heatmap (up to 52 weeks) and dated notes (date left, note right).
+- **Detail pane** with `description:` directly under the habit title, and the description text,
+  schedule line and tags all indented beneath it, then current and best streak, this week's bar,
+  30-day completion, an adaptive heatmap (up to 52 weeks) and dated notes (date left, note right).
 - **Dated notes**: press `n` after checking a habit off to journal the day; empty input removes the
   note and edits are covered by undo.
 - **Hideable bottom bar**: `b` reclaims the hint line and gives the panes one more row.

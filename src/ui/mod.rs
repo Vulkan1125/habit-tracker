@@ -400,6 +400,7 @@ mod tests {
     fn description_sits_directly_under_the_habit_title() {
         let mut app = app_with("Gym");
         app.data.habits[0].note = Some("ten minutes is enough".into());
+        app.data.habits[0].tags = vec!["health".into()];
         let screen = render(&mut app, 90, 34);
         let description = screen.find("description").expect("description heading");
         let title = screen.find("Gym").expect("habit title");
@@ -407,6 +408,8 @@ mod tests {
         assert!(title < description && description < schedule, "{screen}");
         assert_eq!(screen.matches("description:").count(), 1, "{screen}");
         assert!(screen.contains("    ten minutes is enough"), "{screen}");
+        assert!(screen.contains("    daily · since"), "{screen}");
+        assert!(screen.contains("    #health"), "{screen}");
     }
 
     #[test]
