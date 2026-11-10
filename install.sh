@@ -33,7 +33,7 @@ Install $BIN from GitHub releases.
 
 Usage: install.sh [options]
 
-  -v, --version TAG   release to install, for example v0.4.0 (default: latest)
+  -v, --version TAG   release to install, for example v0.5.0 (default: latest)
       --package       force the native package (.deb / .rpm / .pkg.tar.zst)
       --static        force the portable static binary; never asks for root
   -p, --prefix DIR    where --static puts the binary (default: ~/.local)
