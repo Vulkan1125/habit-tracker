@@ -271,7 +271,10 @@ Gym · 4×/week · since 2026-09-14
 No database, no sync, no telemetry, no async runtime, no plugin API. Nine direct dependencies, all
 mainstream. `cargo build --release` produces a single ~1.8 MB binary.
 
-## Install
+## Installation
+
+Every release lists what changed and which package assets it carries; the instructions for all of
+them live here.
 
 macOS, with [Homebrew](https://brew.sh):
 
