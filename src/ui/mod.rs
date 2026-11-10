@@ -381,6 +381,22 @@ mod tests {
     }
 
     #[test]
+    fn an_end_date_shows_the_remaining_days_in_the_list() {
+        let mut app = app_with("Gym");
+        app.data.habits[0].ends = Some(date() + chrono::Duration::days(12));
+        let screen = render(&mut app, 90, 24);
+        assert!(screen.contains("12d left"), "{screen}");
+
+        app.data.habits[0].ends = Some(date());
+        let screen = render(&mut app, 90, 24);
+        assert!(screen.contains("last day"), "{screen}");
+
+        app.data.habits[0].ends = Some(date() - chrono::Duration::days(2));
+        let screen = render(&mut app, 90, 24);
+        assert!(screen.contains("ended"), "{screen}");
+    }
+
+    #[test]
     fn description_sits_directly_under_the_habit_title() {
         let mut app = app_with("Gym");
         app.data.habits[0].note = Some("ten minutes is enough".into());
@@ -389,7 +405,8 @@ mod tests {
         let title = screen.find("Gym").expect("habit title");
         let schedule = screen.find("daily · since").expect("schedule line");
         assert!(title < description && description < schedule, "{screen}");
-        assert_eq!(screen.matches("description").count(), 1, "{screen}");
+        assert_eq!(screen.matches("description:").count(), 1, "{screen}");
+        assert!(screen.contains("    ten minutes is enough"), "{screen}");
     }
 
     #[test]

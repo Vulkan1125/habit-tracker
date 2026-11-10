@@ -306,6 +306,29 @@ fn row_line(habit: &Habit, app: &App, inner_width: usize) -> Line<'static> {
             Some((done, target)) => format!("{done}/{target} wk"),
             None => habit.schedule.describe(),
         };
+    // A habit with an end date trades its schedule label for a countdown, so
+    // a closing window is visible without opening the detail pane.
+    let (schedule, schedule_style) = match habit.ends {
+        Some(ends) => {
+            let days = ends.signed_duration_since(app.today).num_days();
+            let text = if days < 0 {
+                "ended".to_string()
+            } else if days == 0 {
+                "last day".to_string()
+            } else {
+                format!("{days}d left")
+            };
+            let style = if closed {
+                Style::default().fg(theme.dim)
+            } else if (0..=3).contains(&days) {
+                Style::default().fg(theme.warn)
+            } else {
+                Style::default().fg(theme.dim)
+            };
+            (text, style)
+        }
+        None => (schedule, Style::default().fg(theme.dim)),
+    };
     let show_schedule = inner_width >= 34;
     let schedule_width = if show_schedule { 13 } else { 0 };
     let name_width = inner_width
@@ -327,7 +350,7 @@ fn row_line(habit: &Habit, app: &App, inner_width: usize) -> Line<'static> {
     if show_schedule {
         spans.push(Span::styled(
             pad_right(&schedule, schedule_width),
-            Style::default().fg(theme.dim),
+            schedule_style,
         ));
     }
 

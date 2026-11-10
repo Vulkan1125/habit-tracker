@@ -49,12 +49,13 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
 
     if let Some(note) = &habit.note {
         lines.push(Line::from(Span::styled(
-            "description",
+            "description:",
             Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
         )));
-        for chunk in wrap(note, inner_width, 3) {
+        let indent = "    ";
+        for chunk in wrap(note, inner_width.saturating_sub(indent.len()).max(8), 3) {
             lines.push(Line::from(Span::styled(
-                chunk,
+                format!("{indent}{chunk}"),
                 Style::default().fg(theme.fg),
             )));
         }

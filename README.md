@@ -12,8 +12,8 @@ binary with no daemon, no account and no network access.
  habit  Tue 10 Nov 2026                                                            █████░ 3/4 today
 ┌────────────────────────────────────────────┐┌ Details ───────────────────────────────────────────┐
 │ Habits 4   Tags 4                          ││Morning run                                         │
-│▸ ● Morning run         daily        ○●◆○●●●││description                                         │
-│  ● Read 20 pages       Mon–Fri      ●●●··●●││5k before breakfast                                 │
+│▸ ● Morning run         daily        ○●◆○●●●││description:                                        │
+│  ● Read 20 pages       51d left     ●●●··●●││    5k before breakfast                             │
 │  ○ Strength            1/3 wk       ●·●··●·││daily · since 2026-01-01                            │
 │  ● Meditate            daily        ●●●●●●●││#health #morning                                    │
 │  · Evening walk        daily        ○●●●●○◌││                                                    │
@@ -36,6 +36,7 @@ binary with no daemon, no account and no network access.
 │                                            ││2026-11-10 easy recovery run after yesterday        │
 │                                            ││2026-11-09 legs heavy but went anyway               │
 │                                            ││2026-11-08 felt strong, 5k in 26:30                 │
+│                                            ││                                                    │
 └────────────────────────────────────────────┘└────────────────────────────────────────────────────┘
 space toggle · n note · tab tags · b bar · / filter · ? help · q quit
 ```
@@ -140,8 +141,8 @@ natural moment. Dates are shown on the left, notes on the right.
  habit  Tue 10 Nov 2026                                                            █████░ 3/4 today
 ┌────────────────────────────────────────────┐┌ Details ───────────────────────────────────────────┐
 │ Habits 4   Tags 4                          ││Morning run                                         │
-│ ‹ all tags   #health · 2 active            ││description                                         │
-│▸ ● Morning run         daily        ○●◆○●●●││5k before breakfast                                 │
+│ ‹ all tags   #health · 2 active            ││description:                                        │
+│▸ ● Morning run         daily        ○●◆○●●●││    5k before breakfast                             │
 │  ○ Strength            1/3 wk       ●·●··●·││daily · since 2026-01-01                            │
 │   Archive                                  ││#health #morning                                    │
 │  · Evening walk        daily        ○●●●●○◌││                                                    │
@@ -170,10 +171,12 @@ and description. Multiple tokens are ANDed, so `run #morning` narrows to morning
   mouse. Each tag shows its active-habit count; opening one splits active habits from archived and
   finished ones under an **Archive** heading.
 - **Habit rows** with the selected day's marker, a 7-day dot strip and weekly quota progress.
+  Habits with an end date replace the schedule label with a countdown (`51d left`, `last day`,
+  `ended`), turning amber in the final three days.
 - **Date navigation** (`[` `]`, `t` for today): check off, excuse, inspect or annotate any past day.
-- **Detail pane** with the description directly under the habit title, then schedule, tags,
-  current and best streak, this week's bar, 30-day completion, an adaptive heatmap (up to 52
-  weeks) and dated notes (date left, note right).
+- **Detail pane** with `description:` directly under the habit title and its wrapped text indented
+  beneath it, then schedule, tags, current and best streak, this week's bar, 30-day completion, an
+  adaptive heatmap (up to 52 weeks) and dated notes (date left, note right).
 - **Dated notes**: press `n` after checking a habit off to journal the day; empty input removes the
   note and edits are covered by undo.
 - **Hideable bottom bar**: `b` reclaims the hint line and gives the panes one more row.
@@ -607,7 +610,7 @@ A few decisions worth knowing:
 ## Development
 
 ```sh
-cargo test                                  # 132 tests
+cargo test                                  # 133 tests
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 cargo build --release

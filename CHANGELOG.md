@@ -8,6 +8,20 @@ All notable changes to `habit` are recorded here. The format follows
 
 Nothing yet.
 
+## [0.3.2] — 2026-11-10
+
+### Added
+
+- Habits with an **end date** now show the remaining days in the first pane: `51d left`,
+  `last day` on the final day, or `ended` once the window closes. The countdown turns amber in the
+  last three days and replaces the schedule label, so closing habits stand out without opening the
+  detail pane.
+
+### Changed
+
+- The detail pane renders `description:` on its own line with up to three wrapped description lines
+  indented beneath it. Streak, heatmap, notes and everything below are unchanged.
+
 ## [0.3.1] — 2026-11-10
 
 ### Added
@@ -152,7 +166,8 @@ First release.
   failure modes, form validation and TUI rendering via `TestBackend`.
 - CI on Linux and macOS (format, clippy, tests, MSRV 1.88) and a release profile with LTO + strip.
 
-[Unreleased]: https://github.com/Vulkan1125/habit-tracker/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/Vulkan1125/habit-tracker/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.3.2
 [0.3.1]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.3.1
 [0.3.0]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.3.0
 [0.2.1]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.2.1
