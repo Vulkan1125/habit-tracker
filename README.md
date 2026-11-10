@@ -3,6 +3,7 @@
 **A calm habit tracker for the terminal.** Streaks, weekly quotas, heatmaps and a plain JSON file
 you can read — in one 1.7 MB Rust binary with no daemon, no account and no network access.
 
+[![CI](https://github.com/Vulkan1125/habit-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/Vulkan1125/habit-tracker/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-edition%202024-orange.svg)](Cargo.toml)
 
@@ -409,7 +410,8 @@ cargo fmt --check
 cargo build --release
 ```
 
-All of the above must pass locally before a release. CI is not wired up yet.
+CI runs format, clippy and tests on Linux and macOS, plus a check against the MSRV on Rust 1.88
+(see `.github/workflows/ci.yml`).
 
 Test coverage focuses on the parts where bugs are invisible in the UI: streak edge cases across
 week boundaries and quota weeks, schedule compliance, JSON round-trips, atomic-save behaviour

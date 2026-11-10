@@ -31,7 +31,7 @@ First release.
 - **Global flags** `--data <FILE>` and `--today <DATE>`, plus `HABITS_FILE`.
 - **58 tests** covering streaks, quota weeks, schedule compliance, store round-trips, atomic-save
   failure modes, form validation and TUI rendering via `TestBackend`.
-- Release profile with LTO + strip (1.7 MB binary).
+- CI on Linux and macOS (format, clippy, tests, MSRV 1.88) and a release profile with LTO + strip.
 
 [Unreleased]: https://github.com/Vulkan1125/habit-tracker/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.1.0
