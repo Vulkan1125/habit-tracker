@@ -7,8 +7,9 @@ use anyhow::{Result, bail};
 use chrono::{Datelike, Duration, NaiveDate, Weekday};
 use serde::{Deserialize, Serialize};
 
-/// Bumped only when the on-disk shape changes incompatibly.
-pub const DATA_VERSION: u32 = 1;
+/// Bumped whenever the on-disk shape changes, so an older build refuses the file
+/// instead of silently dropping fields it does not know about.
+pub const DATA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Day {
@@ -150,11 +151,17 @@ pub struct Habit {
     pub id: String,
     pub name: String,
     pub schedule: Schedule,
+    /// First day the habit exists. Older files call this `created`.
     pub created: NaiveDate,
+    /// Last day the habit exists, inclusive. Absent means "until archived".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ends: Option<NaiveDate>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub archived: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -168,10 +175,93 @@ impl Habit {
             name,
             schedule,
             created,
+            ends: None,
             archived: false,
             note: None,
+            tags: Vec::new(),
         }
     }
+
+    /// Inside the habit's lifetime: on or after the start, on or before the end.
+    pub fn is_active_on(&self, date: NaiveDate) -> bool {
+        date >= self.created && self.ends.is_none_or(|ends| date <= ends)
+    }
+
+    /// The window has closed, so the habit can no longer be checked off.
+    pub fn is_finished(&self, today: NaiveDate) -> bool {
+        self.ends.is_some_and(|ends| today > ends)
+    }
+
+    /// `since 2026-09-14`, or `2026-09-14 → 2026-12-31` with an end date.
+    pub fn window_label(&self) -> String {
+        match self.ends {
+            Some(ends) => format!("{} → {ends}", self.created),
+            None => format!("since {}", self.created),
+        }
+    }
+
+    pub fn has_tag(&self, tag: &str) -> bool {
+        self.tags.iter().any(|candidate| candidate == tag)
+    }
+
+    /// Adds a normalized tag. Returns false when it was already present.
+    pub fn add_tag(&mut self, raw: &str) -> bool {
+        let Some(tag) = normalize_tag(raw) else {
+            return false;
+        };
+        if self.has_tag(&tag) {
+            return false;
+        }
+        self.tags.push(tag);
+        self.tags.sort();
+        true
+    }
+
+    pub fn remove_tag(&mut self, raw: &str) -> bool {
+        let Some(tag) = normalize_tag(raw) else {
+            return false;
+        };
+        let before = self.tags.len();
+        self.tags.retain(|candidate| candidate != &tag);
+        self.tags.len() != before
+    }
+
+    /// Validates the schedule and the date window together.
+    pub fn validate(&self) -> Result<()> {
+        self.schedule.validate()?;
+        if let Some(ends) = self.ends
+            && ends < self.created
+        {
+            bail!(
+                "the end date ({ends}) is before the start date ({})",
+                self.created
+            );
+        }
+        Ok(())
+    }
+}
+
+/// `#Health & Focus` → `health-focus`; `None` when nothing usable is left.
+pub fn normalize_tag(raw: &str) -> Option<String> {
+    let raw = raw.trim().trim_start_matches('#');
+    let mut tag = String::new();
+    let mut pending_dash = false;
+    for character in raw.chars() {
+        if character.is_alphanumeric() {
+            if pending_dash && !tag.is_empty() {
+                tag.push('-');
+            }
+            pending_dash = false;
+            tag.extend(character.to_lowercase());
+        } else {
+            pending_dash = true;
+        }
+        if tag.chars().count() >= 20 {
+            break;
+        }
+    }
+    let tag = tag.trim_matches('-').to_string();
+    (!tag.is_empty()).then_some(tag)
 }
 
 /// Completion history: `date -> set of habit ids`.
@@ -257,6 +347,109 @@ impl Log {
     }
 }
 
+/// Excused days: `date -> set of habit ids`, shaped like [`Log`].
+///
+/// Only the first cheat day of a habit in a calendar month is excused; later
+/// ones in the same month are ordinary days and can break a streak.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Cheats {
+    entries: BTreeMap<NaiveDate, BTreeSet<String>>,
+}
+
+impl Cheats {
+    pub fn is_cheat(&self, date: NaiveDate, habit_id: &str) -> bool {
+        self.entries
+            .get(&date)
+            .is_some_and(|ids| ids.contains(habit_id))
+    }
+
+    pub fn set(&mut self, date: NaiveDate, habit_id: &str, cheat: bool) {
+        if cheat {
+            self.entries
+                .entry(date)
+                .or_default()
+                .insert(habit_id.to_string());
+            return;
+        }
+        let now_empty = match self.entries.get_mut(&date) {
+            Some(ids) => {
+                ids.remove(habit_id);
+                ids.is_empty()
+            }
+            None => false,
+        };
+        if now_empty {
+            self.entries.remove(&date);
+        }
+    }
+
+    /// Flips `date`, returning the new state.
+    pub fn toggle(&mut self, date: NaiveDate, habit_id: &str) -> bool {
+        let cheat = !self.is_cheat(date, habit_id);
+        self.set(date, habit_id, cheat);
+        cheat
+    }
+
+    /// Whether `date` is the habit's *first* cheat day in its calendar month.
+    pub fn is_excused(&self, date: NaiveDate, habit_id: &str) -> bool {
+        if !self.is_cheat(date, habit_id) {
+            return false;
+        }
+        let first = date.with_day(1).unwrap_or(date);
+        let next_month = if date.month() == 12 {
+            NaiveDate::from_ymd_opt(date.year() + 1, 1, 1)
+        } else {
+            NaiveDate::from_ymd_opt(date.year(), date.month() + 1, 1)
+        };
+        let Some(next_month) = next_month else {
+            return true;
+        };
+        self.entries
+            .range(first..next_month)
+            .find(|(_, ids)| ids.contains(habit_id))
+            .is_some_and(|(first_date, _)| *first_date == date)
+    }
+
+    pub fn ids_on(&self, date: NaiveDate) -> Vec<&str> {
+        self.entries
+            .get(&date)
+            .map(|ids| ids.iter().map(String::as_str).collect())
+            .unwrap_or_default()
+    }
+
+    /// Excused days used in the calendar month containing `date`.
+    pub fn used_in_month(&self, habit_id: &str, date: NaiveDate) -> u32 {
+        let first = date.with_day(1).unwrap_or(date);
+        let next_month = if date.month() == 12 {
+            NaiveDate::from_ymd_opt(date.year() + 1, 1, 1)
+        } else {
+            NaiveDate::from_ymd_opt(date.year(), date.month() + 1, 1)
+        };
+        let Some(next_month) = next_month else {
+            return 0;
+        };
+        self.entries
+            .range(first..next_month)
+            .filter(|(_, ids)| ids.contains(habit_id))
+            .count() as u32
+    }
+
+    pub fn remove_habit(&mut self, habit_id: &str) {
+        self.entries.retain(|_, ids| {
+            ids.remove(habit_id);
+            !ids.is_empty()
+        });
+    }
+}
+
+/// Read-only view of everything that affects a streak.
+#[derive(Debug, Clone, Copy)]
+pub struct History<'a> {
+    pub log: &'a Log,
+    pub cheats: &'a Cheats,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Data {
     #[serde(default = "default_version")]
@@ -265,6 +458,8 @@ pub struct Data {
     pub habits: Vec<Habit>,
     #[serde(default)]
     pub log: Log,
+    #[serde(default)]
+    pub cheats: Cheats,
 }
 
 fn default_version() -> u32 {
@@ -277,6 +472,7 @@ impl Default for Data {
             version: DATA_VERSION,
             habits: Vec::new(),
             log: Log::default(),
+            cheats: Cheats::default(),
         }
     }
 }
@@ -322,11 +518,24 @@ impl Data {
         }
     }
 
+    #[cfg(test)]
     pub fn add_habit(
         &mut self,
         name: &str,
         schedule: Schedule,
         created: NaiveDate,
+    ) -> Result<usize> {
+        self.add_habit_full(name, schedule, created, None, &[], None)
+    }
+
+    pub fn add_habit_full(
+        &mut self,
+        name: &str,
+        schedule: Schedule,
+        created: NaiveDate,
+        ends: Option<NaiveDate>,
+        tags: &[String],
+        note: Option<&str>,
     ) -> Result<usize> {
         let name = name.trim();
         if name.is_empty() {
@@ -343,16 +552,38 @@ impl Data {
             bail!("a habit named \"{}\" already exists", existing.name);
         }
         schedule.validate()?;
+        if let Some(ends) = ends
+            && ends < created
+        {
+            bail!("the end date ({ends}) is before the start date ({created})");
+        }
         let id = self.unique_id(name);
-        self.habits
-            .push(Habit::new(id, name.to_string(), schedule, created));
+        let mut habit = Habit::new(id, name.to_string(), schedule, created);
+        habit.ends = ends;
+        habit.note = note
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(str::to_string);
+        for tag in tags {
+            habit.add_tag(tag);
+        }
+        habit.validate()?;
+        self.habits.push(habit);
         Ok(self.habits.len() - 1)
     }
 
-    /// Remove a habit and every completion recorded for it.
+    pub fn history(&self) -> History<'_> {
+        History {
+            log: &self.log,
+            cheats: &self.cheats,
+        }
+    }
+
+    /// Remove a habit and every completion and cheat day recorded for it.
     pub fn remove_habit(&mut self, index: usize) -> Habit {
         let habit = self.habits.remove(index);
         self.log.remove_habit(&habit.id);
+        self.cheats.remove_habit(&habit.id);
         habit
     }
 
@@ -367,24 +598,39 @@ impl Data {
             .expect("unbounded suffix search cannot fail")
     }
 
-    /// Habit indices in display order: active first, archived last, stable otherwise.
-    pub fn display_order(&self) -> Vec<usize> {
+    /// Habit indices in display order: running first, archived and finished last,
+    /// stable otherwise.
+    pub fn display_order(&self, today: NaiveDate) -> Vec<usize> {
         let mut order: Vec<usize> = (0..self.habits.len()).collect();
-        order.sort_by_key(|index| (self.habits[*index].archived, *index));
+        order.sort_by_key(|index| {
+            let habit = &self.habits[*index];
+            (habit.archived || habit.is_finished(today), *index)
+        });
         order
     }
 
+    /// Habits that are still running and scheduled for `today`.
     pub fn due_today(&self, today: NaiveDate) -> usize {
         self.habits
             .iter()
-            .filter(|habit| !habit.archived && habit.schedule.is_due(today))
+            .filter(|habit| {
+                !habit.archived
+                    && habit.is_active_on(today)
+                    && !habit.is_finished(today)
+                    && habit.schedule.is_due(today)
+            })
             .count()
     }
 
     pub fn done_today(&self, today: NaiveDate) -> usize {
         self.habits
             .iter()
-            .filter(|habit| !habit.archived && self.log.is_done(today, &habit.id))
+            .filter(|habit| {
+                !habit.archived
+                    && habit.is_active_on(today)
+                    && !habit.is_finished(today)
+                    && self.log.is_done(today, &habit.id)
+            })
             .count()
     }
 }
@@ -541,6 +787,114 @@ mod tests {
         data.add_habit("A", Schedule::Daily, day).unwrap();
         data.add_habit("B", Schedule::Daily, day).unwrap();
         data.habits[0].archived = true;
-        assert_eq!(data.display_order(), vec![1, 0]);
+        assert_eq!(data.display_order(day), vec![1, 0]);
+    }
+
+    #[test]
+    fn finished_habits_sort_with_archived_ones() {
+        let mut data = Data::default();
+        let day = date("2026-01-01");
+        data.add_habit("A", Schedule::Daily, day).unwrap();
+        data.add_habit("B", Schedule::Daily, day).unwrap();
+        data.habits[0].ends = Some(date("2026-06-01"));
+        assert_eq!(data.display_order(date("2026-05-31")), vec![0, 1]);
+        assert_eq!(data.display_order(date("2026-06-02")), vec![1, 0]);
+    }
+
+    #[test]
+    fn active_window_is_inclusive_on_both_ends() {
+        let mut habit = Habit::new("h".into(), "H".into(), Schedule::Daily, date("2026-03-01"));
+        habit.ends = Some(date("2026-03-31"));
+        assert!(!habit.is_active_on(date("2026-02-28")));
+        assert!(habit.is_active_on(date("2026-03-01")));
+        assert!(habit.is_active_on(date("2026-03-31")));
+        assert!(!habit.is_active_on(date("2026-04-01")));
+        assert!(!habit.is_finished(date("2026-03-31")));
+        assert!(habit.is_finished(date("2026-04-01")));
+    }
+
+    #[test]
+    fn window_label_shows_the_end_when_there_is_one() {
+        let mut habit = Habit::new("h".into(), "H".into(), Schedule::Daily, date("2026-03-01"));
+        assert_eq!(habit.window_label(), "since 2026-03-01");
+        habit.ends = Some(date("2026-03-31"));
+        assert_eq!(habit.window_label(), "2026-03-01 → 2026-03-31");
+    }
+
+    #[test]
+    fn tags_are_normalized_deduplicated_and_sorted() {
+        let mut habit = Habit::new("h".into(), "H".into(), Schedule::Daily, date("2026-03-01"));
+        assert!(habit.add_tag("#Health & Focus"));
+        assert!(!habit.add_tag("health-focus"));
+        assert!(habit.add_tag("  Morning  "));
+        assert_eq!(habit.tags, vec!["health-focus", "morning"]);
+        assert!(habit.has_tag("morning"));
+        assert!(habit.remove_tag("#HEALTH-FOCUS"));
+        assert_eq!(habit.tags, vec!["morning"]);
+        assert!(!habit.remove_tag("missing"));
+        assert_eq!(normalize_tag("!!!"), None);
+    }
+
+    #[test]
+    fn only_the_first_cheat_in_a_month_is_excused() {
+        let mut cheats = Cheats::default();
+        assert!(!cheats.is_excused(date("2026-11-05"), "gym"));
+        cheats.set(date("2026-11-05"), "gym", true);
+        assert!(cheats.is_excused(date("2026-11-05"), "gym"));
+        cheats.set(date("2026-11-19"), "gym", true);
+        assert!(!cheats.is_excused(date("2026-11-19"), "gym"));
+        // A new month resets the allowance.
+        cheats.set(date("2026-12-01"), "gym", true);
+        assert!(cheats.is_excused(date("2026-12-01"), "gym"));
+        assert_eq!(cheats.used_in_month("gym", date("2026-11-30")), 2);
+        assert_eq!(cheats.used_in_month("gym", date("2026-12-15")), 1);
+    }
+
+    #[test]
+    fn cheat_entries_are_per_habit() {
+        let mut cheats = Cheats::default();
+        cheats.set(date("2026-11-05"), "gym", true);
+        assert!(cheats.is_excused(date("2026-11-05"), "gym"));
+        assert!(!cheats.is_excused(date("2026-11-05"), "read"));
+        assert_eq!(cheats.ids_on(date("2026-11-05")), vec!["gym"]);
+        assert!(!cheats.toggle(date("2026-11-05"), "gym"));
+        assert!(cheats.ids_on(date("2026-11-05")).is_empty());
+    }
+
+    #[test]
+    fn removing_a_habit_purges_cheat_days_too() {
+        let mut data = Data::default();
+        let day = date("2026-01-01");
+        data.add_habit("Gym", Schedule::Daily, day).unwrap();
+        data.cheats.set(day, "gym", true);
+        data.remove_habit(0);
+        assert!(data.cheats.ids_on(day).is_empty());
+    }
+
+    #[test]
+    fn add_habit_full_validates_the_window() {
+        let mut data = Data::default();
+        let error = data
+            .add_habit_full(
+                "Gym",
+                Schedule::Daily,
+                date("2026-05-01"),
+                Some(date("2026-04-01")),
+                &[],
+                None,
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("before the start"));
+        data.add_habit_full(
+            "Gym",
+            Schedule::Daily,
+            date("2026-05-01"),
+            Some(date("2026-06-01")),
+            &["Health".into()],
+            Some("  ten minutes  "),
+        )
+        .unwrap();
+        assert_eq!(data.habits[0].tags, vec!["health"]);
+        assert_eq!(data.habits[0].note.as_deref(), Some("ten minutes"));
     }
 }

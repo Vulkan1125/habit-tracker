@@ -10,7 +10,10 @@ use crate::format::pad_right;
 use crate::theme::Theme;
 
 const KEYS: &[(&str, &str)] = &[
-    ("space", "check off / undo today"),
+    ("space", "check off / undo the selected day"),
+    ("c", "cheat day (one per month)"),
+    ("[ ]", "previous / next day"),
+    ("t", "back to today"),
     ("j k ↑ ↓", "move"),
     ("g G", "first / last"),
     ("a", "add a habit"),
@@ -18,14 +21,14 @@ const KEYS: &[(&str, &str)] = &[
     ("d", "archive or restore"),
     ("x", "delete (asks first)"),
     ("u", "undo the last change"),
-    ("/", "filter by name"),
+    ("/", "filter by text, tag or #tag"),
     ("r", "reload the file from disk"),
     ("?", "this help"),
     ("q", "quit"),
 ];
 
 pub fn draw(frame: &mut Frame, area: Rect, theme: &Theme) {
-    let width = area.width.saturating_sub(4).clamp(30, 52);
+    let width = area.width.saturating_sub(4).clamp(34, 56);
     let height = (KEYS.len() as u16 + 6).min(area.height.saturating_sub(2));
     let x = area.x + area.width.saturating_sub(width) / 2;
     let y = area.y + area.height.saturating_sub(height) / 2;
@@ -37,7 +40,10 @@ pub fn draw(frame: &mut Frame, area: Rect, theme: &Theme) {
     };
 
     frame.render_widget(Clear, popup);
-    let block = Block::bordered().title(" Keys ");
+    let block = Block::bordered()
+        .title(" Keys ")
+        .border_style(Style::default().fg(theme.border))
+        .style(theme.base());
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
 
@@ -55,7 +61,7 @@ pub fn draw(frame: &mut Frame, area: Rect, theme: &Theme) {
     for (keys, action) in KEYS {
         lines.push(Line::from(vec![
             Span::styled(pad_right(keys, 12), Style::default().fg(theme.warn)),
-            Span::styled(*action, Style::default()),
+            Span::styled(*action, Style::default().fg(theme.fg)),
         ]));
     }
     lines.push(Line::raw(""));
@@ -64,5 +70,5 @@ pub fn draw(frame: &mut Frame, area: Rect, theme: &Theme) {
         Style::default().fg(theme.dim),
     )));
 
-    frame.render_widget(Paragraph::new(lines), inner);
+    frame.render_widget(Paragraph::new(lines).style(theme.base()), inner);
 }

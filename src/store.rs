@@ -55,7 +55,7 @@ impl Store {
         if raw.trim().is_empty() {
             return Ok(Data::default());
         }
-        let data: Data = serde_json::from_str(&raw)
+        let mut data: Data = serde_json::from_str(&raw)
             .with_context(|| format!("parsing {} (is it valid JSON?)", self.path.display()))?;
         if data.version > DATA_VERSION {
             bail!(
@@ -64,6 +64,9 @@ impl Store {
                 data.version
             );
         }
+        // Older formats only lack fields that default cleanly; stamp the new
+        // version so the next save does not leave a v1 file holding v2 fields.
+        data.version = DATA_VERSION;
         Ok(data)
     }
 
@@ -169,6 +172,25 @@ mod tests {
         fs::write(&path, "  \n").unwrap();
         let store = Store::resolve(Some(path)).unwrap();
         assert!(store.load().unwrap().habits.is_empty());
+    }
+
+    #[test]
+    fn upgrades_a_v1_file_on_load_and_saves_it_as_v2() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("data.json");
+        fs::write(
+            &path,
+            r#"{"version": 1, "habits": [{"id": "gym", "name": "Gym", "schedule": {"kind": "daily"}, "created": "2026-01-01"}], "log": {"2026-01-02": ["gym"]}}"#,
+        )
+        .unwrap();
+        let store = Store::resolve(Some(path.clone())).unwrap();
+        let data = store.load().unwrap();
+        assert_eq!(data.version, DATA_VERSION);
+        assert_eq!(data.habits[0].tags.len(), 0);
+        assert!(data.habits[0].is_active_on(date("2026-01-02")));
+        store.save(&data).unwrap();
+        let raw = fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("\"version\": 2"), "{raw}");
     }
 
     #[test]

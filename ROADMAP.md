@@ -1,36 +1,39 @@
 # Roadmap
 
-Planned work for `habit`, roughly in the order it would be built. Nothing here is a promise of a
-date; it is a design sketch so the decisions are written down before the code exists.
+Design notes for `habit`. This started as the plan for 0.2.0; all six features below shipped in
+that release. The sections are kept as a record of the decisions, with a **Shipped** note where the
+implementation differs from the sketch. Open work moved to [Carried over](#carried-over-from-01x).
 
-`0.1.0` is the released baseline. Everything below is additive and keeps the two rules that make
-the project what it is: **one plain JSON file** and **no daemon, account or network**.
+Every feature keeps the two rules that make the project what it is: **one plain JSON file** and
+**no daemon, account or network**.
 
 ## How the pieces fit together
 
 Six requested features, plus the items carried over from 0.1.0.
 
-| # | Feature | Size | Depends on |
+| # | Feature | Size | Status |
 | --- | --- | --- | --- |
-| 1 | Start and end dates | M | — |
-| 2 | Cheat days (one per month) | L | date navigation in the TUI |
-| 3 | Notes | S | — |
-| 4 | Tags and tag filtering | M | — |
-| 5 | Graph in the detail pane | M | — |
-| 6 | A genuinely beautiful UI | L | 1–5, so it can be designed once |
+| 1 | Start and end dates | M | shipped |
+| 2 | Cheat days (one per month) | L | shipped |
+| 3 | Notes | S | shipped (per-habit; per-day still open) |
+| 4 | Tags and tag filtering | M | shipped |
+| 5 | Graph in the detail pane | M | shipped (sparkline; chart ranges open) |
+| 6 | A genuinely beautiful UI | L | shipped (seven palettes, square borders) |
 
-Suggested sequence: **3 → 4 → 1 → 2 → 5 → 6**. Notes and tags are isolated and make the list
-easier to live with immediately; dates and cheat days touch the streak engine, which is the part
-that must stay correct; the graph and the visual pass come last so they only have to be designed
-and tuned once.
+The sequence was **3 → 4 → 1 → 2 → 5 → 6**. Notes and tags were isolated and made the list easier
+to live with immediately; dates and cheat days touched the streak engine, which is the part that
+must stay correct; the graph and the visual pass came last so they only had to be designed once.
 
-A prerequisite for 2 and for half of 3: **the TUI can only act on today right now.** Backfilling
-exists only as `habit done --date`. Any date-scoped feature needs a way to move the TUI's cursor
-to another day first.
+**Shipped:** the TUI now has a selected day (`[` `]`, `t`), so date-scoped features and backfilling
+work in the interface as well as the CLI. This was the prerequisite for cheat days and notes.
 
 ---
 
 ## 1. Start and end dates for habits
+
+**Shipped in 0.2.0.** `Habit` has `ends`, `created` stays the start, and the window is enforced by
+`is_active_on` / `is_finished` in the model and by `scope_end` in `stats.rs`. Both dates are in the
+TUI dialog. The three open questions below were resolved as written.
 
 Today a habit starts on `created` and never ends; you archive it as a manual, reversible flag.
 
@@ -51,18 +54,22 @@ Today a habit starts on `created` and never ends; you archive it as a manual, re
 - Editing the end date in either direction recomputes streaks, because stats are pure functions of
   `(habit, log, today)`.
 
-**Open questions**
+**Decisions**
 
-- Does a finished habit keep accruing "missed" days after `ends`? No — it should freeze, and the
-  detail pane should say `finished 2026-12-31` instead of showing a decaying streak.
-- Should `ends` in the past auto-archive the habit, or keep two separate concepts? Prefer separate:
-  `ends` is a scheduled finish, `archived` is a manual hide.
-- Editing `created` after check-ins exist: warn, but allow — the log keeps entries outside the
-  window and stats already ignore them.
+- A finished habit freezes its stats on its final day; the detail pane labels it `finished` instead
+  of showing a decaying streak.
+- `ends` and `archived` stay separate: a scheduled finish is not a manual hide. Both sort together
+  at the bottom of the list.
+- Editing `created` after check-ins exist is allowed; entries outside the window are kept in the
+  log and ignored by stats. The CLI warns if `ends` would end up before the new start.
 
 ---
 
 ## 2. Cheat days — one per month
+
+**Shipped in 0.2.0.** The streak engine takes `History { log, cheats }`; `Cheats::is_excused`
+derives the monthly allowance at query time, so backfilling or removing an earlier cheat immediately
+recomputes which day is free.
 
 Mark a day as excused: it does not break the streak, and it renders in its own colour. A **second**
 cheat day in the same calendar month is not excused and breaks the streak.
@@ -93,20 +100,25 @@ Keyed by date and habit id, matching `log`'s shape, sorted, hand-editable.
 
 - CLI: `habit cheat <habit> [--date D]`, `habit cheat <habit> --off`, and a `CHEAT` marker in
   `habit log`.
-- TUI: `c` toggles a cheat day on the selected date; the heatmap uses a distinct colour (planned:
-  cyan) with its own legend entry; the detail pane shows `cheats used 1/1 · November`.
+- TUI: `c` toggles a cheat day on the selected date; the heatmap uses each palette's cheat colour
+  with its own legend entry; the detail pane shows e.g. `◆ 2 cheat this Nov`.
 - Help overlay and README streak rules both need the new row.
 
-**Why this is the biggest item:** the streak engine currently takes `(habit, log, today)`. It would
-become `(habit, log, cheats, today)` and gain a month-bucketing rule, and every existing streak
-test needs a cheat-day sibling. That is the correct place for the complexity — keep it in
+**Why this was the biggest item:** the streak engine used to take `(habit, log, today)`. It now
+takes `(habit, history, today)` where `history` bundles the log and cheat map, and it gained the
+month-bucketing rule. Every existing streak test has a cheat-day sibling. The complexity stayed in
 `stats.rs` as pure functions.
 
 ---
 
 ## 3. Notes
 
-The `note` field and its rendering already exist; there is no way to write one from the app.
+**Phase 1 shipped in 0.2.0:** the per-habit note is editable in the dialog and via `habit note`,
+wrapped in the detail pane, and included in search. Phase 2 (per-day notes) is still open and moved
+to [Carried over](#carried-over-from-01x).
+
+The `note` field and its rendering already existed in 0.1.0; there was no way to write one from
+the app.
 
 **Phase 1 — per-habit note (small)**
 
@@ -130,6 +142,9 @@ journal app.
 
 ## 4. Tags and tag filtering
 
+**Shipped in 0.2.0.** Tags are normalised, sorted, rendered as chips and accepted as `#tag` in the
+filter. Filtering is AND-only; OR syntax and rename/merge are still open.
+
 **Data**
 
 `tags: Vec<String>` on `Habit`, normalised to lowercase kebab-case, de-duplicated, sorted. Omitted
@@ -137,34 +152,34 @@ from JSON when empty, like `note` and `archived`.
 
 **Surfaces**
 
-- CLI: `habit add "X" --tag health --tag morning` (repeatable), `habit tag <habit> +health`,
-  `habit tag <habit> -health`, `habit tags` (all tags with counts), and `habit list --tag health`.
-- TUI: tag chips after the habit name, a tag facet in the filter bar, and `#health` typed directly
-  into `/` to filter. Search should match name, tags and notes.
-- Detail pane: tags listed under the schedule line.
+- CLI (shipped): `habit add "X" --tag health --tag morning` (repeatable),
+  `habit tag <habit> health morning`, `habit tag <habit> cardio --remove`, `habit tags`
+  (all tags with counts), and `habit list --tag health`.
+- TUI (shipped): tag chips in the detail pane and `#health` typed directly into `/` to filter.
+  Search matches name, id, tags and notes.
+- Detail pane: tags are listed under the schedule line.
 
-**Open questions**
+**Open**
 
-- Multi-tag filter: AND or OR? Default AND, with `/` accepting `#a #b` as AND and a documented
-  `#a|#b` form for OR if the filter parser stays simple enough.
-- Tag rename/merge: `habit tag --rename old new` is cheap and prevents typo sprawl from becoming
-  permanent.
+- OR filtering (`#a|#b`) if the parser can stay simple.
+- Tag rename/merge (`habit tag --rename old new`) to stop typo sprawl becoming permanent.
 
 ---
 
 ## 5. Graph in the detail pane
 
-The 9-week heatmap answers "which days did I do it". It does not answer "am I trending up".
+**Shipped in 0.2.0** as a compact rolling 7-day completion **sparkline** above the heatmap; the
+heatmap stayed, and is now adaptive up to 52 weeks. No new dependency was needed. The richer chart
+(axes, target line, switchable ranges, quota bars) is still open.
 
-**Proposal**
+The heatmap answers "which days did I do it". It does not answer "am I trending up".
 
-- Keep the heatmap (it is the identity of the app) and add above it a **rolling completion line**
-  for the last 30 days, rendered with ratatui's `Chart`, with a 7-day moving average and a faint
-  target line at the schedule's expected rate.
-- Below 72 columns, degrade to `Sparkline`; below 60, drop to a single `LineGauge` for the period.
-- For quota habits, plot sessions-per-week as bars (`BarChart`) instead of a daily line, since a
-  daily line is noise when only the weekly total matters.
-- Time range switchable from the pane (`[` `]` to cycle 30d / 90d / 1y).
+**Still open**
+
+- A `Chart` with a 7-day moving average and a faint target line, for wide terminals.
+- Time ranges switchable from the pane (30d / 90d / 1y).
+- For quota habits, sessions-per-week bars instead of a daily line, since a daily line is noise
+  when only the weekly total matters.
 
 **Constraints**
 
@@ -176,22 +191,27 @@ The 9-week heatmap answers "which days did I do it". It does not answer "am I tr
 
 ## 6. The UI should be gorgeous
 
+**Shipped in 0.2.0**, with one explicit product decision: **square borders, not rounded**. The
+capability detection, seven palettes, per-habit accents and responsive layout all landed.
+
 A deliberate design pass, not a pile of colours. Goal: the screenshot should make someone want to
 install it.
 
 **Layout**
 
-- Rounded borders everywhere, one shared gutter, no full-width horizontal rules.
+- Square borders everywhere (an explicit product decision), one shared gutter, no full-width
+  horizontal rules.
 - The detail pane gets a clear visual hierarchy: habit name as a heading, metadata dimmed, numbers
   right-aligned and tabular.
-- Overlays (help, form, confirm) float on a dimmed backdrop instead of replacing the screen.
+- Overlays (help, form, confirm) float over the panes using `Clear`; the backdrop is not dimmed,
+  because that would need a second full redraw on every frame.
 
 **Colour**
 
 - Truecolor when the terminal reports it, 256-colour fallback, `mono` for the rest — detected once
   at startup, no config required.
 - Per-habit accent derived from a hash of the id, so a habit keeps its colour across sessions
-  without storing one; used for the selection bar, dots and graph line.
+  without storing one; used for the detail heading and trend line.
 - Dedicated semantics: green done, amber open, red missed, cyan cheat, dim not-due. Every colour
   also has a glyph or weight difference so nothing depends on colour alone.
 
@@ -210,16 +230,18 @@ beyond palette tables.
 
 **Definition of done**
 
-- Renders correctly at 60, 80, 120 and 200 columns, in all three themes.
-- A frame-by-frame review at each width, with `TestBackend` snapshots as regression tests.
+- Renders correctly at 60, 80, 96 and 200 columns (and degrades sensibly below that).
+- A frame-by-frame review at each width, in all seven themes and both modes.
+- `TestBackend` frame tests for the layout, help, form and confirm overlays.
 - README screenshots regenerated from the final look.
 
 ---
 
-## Carried over from 0.1.0
+## Carried over from 0.1.x
 
-- Backfilling days from inside the TUI (CLI `--date` works today). This is a prerequisite for
-  cheat days, so it moves up.
+- Per-day notes, shown for the selected day and in `habit log`.
+- Switchable trend ranges and a quota bar chart.
+- Tag rename/merge.
 - Optional reminders/notifications — fights the "no daemon" design, so it would be opt-in and
   OS-native (`launchd`/`systemd`), not an in-app loop.
 - Import/export helpers (CSV, and reading a previous `data.json`) and a monthly HTML report.
@@ -241,6 +263,6 @@ file, drop the fields it does not know about on the next save, and lose data qui
 that old build refuses the file with a clear error instead, and the original is still on disk as
 `data.json.bak`.
 
-Each release upgrades the file on first open and keeps backups of the pre-migration file. Every
-feature above lands with tests in `stats.rs` (or wherever the logic belongs) and, where it renders,
-a `TestBackend` frame test.
+Implemented in 0.2.0: a version-1 file loads with defaults for the new fields and is stamped
+version 2 on the next save, while a future version is refused. Every feature lands with tests in
+`stats.rs` (or wherever the logic belongs) and, where it renders, a `TestBackend` frame test.

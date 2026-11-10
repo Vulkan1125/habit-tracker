@@ -17,6 +17,12 @@ use crate::theme::Theme;
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
+    let theme = app.theme;
+
+    if let Some(bg) = theme.bg {
+        frame.render_widget(Block::default().style(Style::default().bg(bg)), area);
+    }
+
     let rows = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(3),
@@ -39,9 +45,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     match &app.mode {
         Mode::Normal => {}
-        Mode::Help => help::draw(frame, area, &app.theme),
-        Mode::Form(form) => form.draw(frame, area, &app.theme),
-        Mode::Confirm(confirm) => confirm_overlay(frame, area, &app.theme, &confirm.prompt),
+        Mode::Help => help::draw(frame, area, &theme),
+        Mode::Form(form) => form.draw(frame, area, &theme),
+        Mode::Confirm(confirm) => confirm_overlay(frame, area, &theme, &confirm.prompt),
     }
 }
 
@@ -50,10 +56,32 @@ fn header(frame: &mut Frame, area: Rect, app: &App) {
     let date = app.today.format("%a %-d %b %Y").to_string();
     let done = app.data.done_today(app.today);
     let due = app.data.due_today(app.today);
+    let ratio = if due == 0 {
+        0.0
+    } else {
+        f64::from(done as u32) / f64::from(due as u32)
+    };
+    let compact = area.width < 46;
+    let (filled, empty) = if compact {
+        (String::new(), String::new())
+    } else {
+        theme.bar(ratio, 6)
+    };
 
-    let left = format!(" habit  {date}");
-    let right = format!("{done}/{due} today ");
-    let padding = (area.width as usize).saturating_sub(width(&left) + width(&right));
+    let viewing = if app.view_date == app.today {
+        String::new()
+    } else {
+        format!("· {} ", app.view_date.format("%a %-d %b"))
+    };
+    let right_text = if compact {
+        format!(" {done}/{due} ")
+    } else {
+        format!(" {done}/{due} today ")
+    };
+
+    let left_width = 10 + width(&date) + width(&viewing);
+    let right_width = width(&filled) + width(&empty) + width(&right_text);
+    let padding = (area.width as usize).saturating_sub(left_width + right_width);
 
     let right_style = if due > 0 && done >= due {
         Style::default().fg(theme.done).add_modifier(Modifier::BOLD)
@@ -69,10 +97,13 @@ fn header(frame: &mut Frame, area: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(format!("  {date}"), Style::default().fg(theme.dim)),
+        Span::styled(format!("  {viewing}"), Style::default().fg(theme.warn)),
         Span::raw(" ".repeat(padding)),
-        Span::styled(right, right_style),
+        Span::styled(filled, Style::default().fg(theme.done)),
+        Span::styled(empty, Style::default().fg(theme.border)),
+        Span::styled(right_text, right_style),
     ]);
-    frame.render_widget(Paragraph::new(line), area);
+    frame.render_widget(Paragraph::new(line).style(theme.base()), area);
 }
 
 fn footer(frame: &mut Frame, area: Rect, app: &App) {
@@ -84,28 +115,48 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
                 .fg(theme.missed)
                 .add_modifier(Modifier::BOLD),
         ),
+        Some(flash) if flash.warn => (
+            flash.text.clone(),
+            Style::default().fg(theme.warn).add_modifier(Modifier::BOLD),
+        ),
         Some(flash) => (
             flash.text.clone(),
             Style::default().fg(theme.done).add_modifier(Modifier::BOLD),
         ),
-        None => (hint(app), Style::default().fg(theme.dim)),
+        None => (
+            hint(app, area.width as usize),
+            Style::default().fg(theme.dim),
+        ),
     };
     let max = area.width as usize;
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(truncate(&text, max), style))),
+        Paragraph::new(Line::from(Span::styled(truncate(&text, max), style))).style(theme.base()),
         area,
     );
 }
 
-fn hint(app: &App) -> String {
+fn hint(app: &App, max_width: usize) -> String {
     match &app.mode {
         Mode::Help => "press any key to close help".to_string(),
         Mode::Form(_) => "tab next · enter save · esc cancel".to_string(),
         Mode::Confirm(_) => "y confirm · n cancel".to_string(),
-        Mode::Normal if app.filtering => "type to filter · enter keep · esc clear".to_string(),
+        Mode::Normal if app.filtering => {
+            "type to filter · #tag for tags · enter keep · esc clear".to_string()
+        }
         Mode::Normal => {
-            "space toggle · a add · e edit · d archive · x delete · u undo · / filter · ? help · q quit"
-                .to_string()
+            let full = "space toggle · c cheat · [ ] day · t today · a add · e edit · d archive · x delete · u undo · / filter · ? help · q quit";
+            if width(full) <= max_width {
+                return full.to_string();
+            }
+            let medium = "space toggle · c cheat · [ ] day · / filter · ? help · q quit";
+            if width(medium) <= max_width {
+                return medium.to_string();
+            }
+            let tiny = "space · c cheat · / filter · ? help · q";
+            if width(tiny) <= max_width {
+                return tiny.to_string();
+            }
+            "space · / · ? · q".to_string()
         }
     }
 }
@@ -122,7 +173,8 @@ fn confirm_overlay(frame: &mut Frame, area: Rect, theme: &Theme, prompt: &str) {
     frame.render_widget(Clear, popup);
     let block = Block::bordered()
         .title(" Confirm ")
-        .border_style(Style::default().fg(theme.missed));
+        .border_style(Style::default().fg(theme.missed))
+        .style(theme.base());
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
 
@@ -149,7 +201,8 @@ fn confirm_overlay(frame: &mut Frame, area: Rect, theme: &Theme, prompt: &str) {
                 ),
                 Span::styled(" keep", Style::default().fg(theme.dim)),
             ]),
-        ]),
+        ])
+        .style(theme.base()),
         inner,
     );
 }
@@ -200,6 +253,7 @@ mod tests {
         assert!(screen.contains("Details"));
         assert!(screen.contains("streak"));
         assert!(screen.contains("today"));
+        assert!(screen.contains("trend"), "{screen}");
     }
 
     #[test]
@@ -223,16 +277,18 @@ mod tests {
         app.mode = Mode::Help;
         let screen = render(&mut app, 90, 30);
         assert!(screen.contains("Keys"), "{screen}");
-        assert!(screen.contains("check off"));
+        assert!(screen.contains("cheat"), "{screen}");
     }
 
     #[test]
     fn form_overlay_renders() {
         let mut app = app_with("Gym");
-        app.mode = Mode::Form(Box::new(form::Form::new()));
-        let screen = render(&mut app, 90, 24);
+        app.mode = Mode::Form(Box::new(form::Form::new(date())));
+        let screen = render(&mut app, 90, 30);
         assert!(screen.contains("New habit"), "{screen}");
-        assert!(screen.contains("Schedule"));
+        assert!(screen.contains("Schedule"), "{screen}");
+        assert!(screen.contains("Tags"), "{screen}");
+        assert!(screen.contains("Note"), "{screen}");
     }
 
     #[test]
@@ -241,5 +297,21 @@ mod tests {
         app.data.log.set(date(), "gym", true);
         let screen = render(&mut app, 90, 24);
         assert!(screen.contains("1 day"), "{screen}");
+    }
+
+    #[test]
+    fn viewing_another_day_is_announced_in_the_header() {
+        let mut app = app_with("Gym");
+        app.shift_day(-2);
+        let screen = render(&mut app, 90, 24);
+        assert!(screen.contains("Sun 8 Nov"), "{screen}");
+    }
+
+    #[test]
+    fn a_cheat_day_renders_with_its_own_glyph() {
+        let mut app = app_with("Gym");
+        app.data.cheats.set(date(), "gym", true);
+        let screen = render(&mut app, 90, 24);
+        assert!(screen.contains("cheat"), "{screen}");
     }
 }

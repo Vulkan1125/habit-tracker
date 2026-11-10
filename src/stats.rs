@@ -1,11 +1,11 @@
-//! Streaks, completion rates and heatmap data.
+//! Streaks, completion rates, trend series and heatmap data.
 //!
-//! Everything here is a pure function of `(habit, log, today)`, so the tests can
-//! pin a date instead of depending on the wall clock.
+//! Everything here is a pure function of `(habit, history, today)`, so the tests
+//! can pin a date instead of depending on the wall clock.
 
 use chrono::{Duration, NaiveDate};
 
-use crate::model::{Day, Habit, Log, Schedule, start_of_week};
+use crate::model::{Day, Habit, History, Schedule, start_of_week};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
@@ -13,6 +13,10 @@ pub enum Status {
     Missed,
     NotDue,
     Future,
+    /// The first cheat day of the month: skipped, so it cannot break a streak.
+    Cheat,
+    /// Today is due but still open, so it is not a miss yet.
+    Pending,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -39,47 +43,71 @@ impl Streak {
     }
 }
 
-/// Whether `date` counts as done, missed, or not expected.
+/// Whether `date` counts as done, missed, excused, or not expected.
 ///
 /// For `TimesPerWeek` habits an un-logged day is *not* a miss — only the weekly
 /// quota matters, so those days render as "not due" and the quota is shown
-/// separately.
-pub fn status_on(habit: &Habit, log: &Log, date: NaiveDate, today: NaiveDate) -> Status {
+/// separately. The same is true outside the habit's start/end window.
+pub fn status_on(habit: &Habit, history: &History, date: NaiveDate, today: NaiveDate) -> Status {
     if date > today {
         return Status::Future;
     }
-    if log.is_done(date, &habit.id) {
+    if !habit.is_active_on(date) {
+        return Status::NotDue;
+    }
+    if history.log.is_done(date, &habit.id) {
         return Status::Done;
     }
-    if date < habit.created {
-        return Status::NotDue;
+    if history.cheats.is_excused(date, &habit.id) {
+        return Status::Cheat;
     }
     if matches!(habit.schedule, Schedule::TimesPerWeek { .. }) || !habit.schedule.is_due(date) {
         return Status::NotDue;
+    }
+    if date == today {
+        return Status::Pending;
     }
     Status::Missed
 }
 
 /// Inclusive list of the last `days` days ending on `today`.
-pub fn recent(habit: &Habit, log: &Log, today: NaiveDate, days: u32) -> Vec<(NaiveDate, Status)> {
+pub fn recent(
+    habit: &Habit,
+    history: &History,
+    today: NaiveDate,
+    days: u32,
+) -> Vec<(NaiveDate, Status)> {
     let days = days.max(1);
     (0..days)
         .rev()
         .map(|back| {
             let date = today - Duration::days(back as i64);
-            (date, status_on(habit, log, date, today))
+            (date, status_on(habit, history, date, today))
         })
         .collect()
 }
 
-fn history_start(habit: &Habit, log: &Log) -> NaiveDate {
-    match log.first_date_for(&habit.id) {
+fn history_start(habit: &Habit, history: &History) -> NaiveDate {
+    match history.log.first_date_for(&habit.id) {
         Some(logged) => logged.min(habit.created),
         None => habit.created,
     }
 }
 
-pub fn current_streak(habit: &Habit, log: &Log, today: NaiveDate, week_start: Day) -> Streak {
+/// The last day worth looking at: today, or the habit's end date once it passed.
+fn scope_end(habit: &Habit, today: NaiveDate) -> NaiveDate {
+    match habit.ends {
+        Some(ends) => ends.min(today),
+        None => today,
+    }
+}
+
+pub fn current_streak(
+    habit: &Habit,
+    history: &History,
+    today: NaiveDate,
+    week_start: Day,
+) -> Streak {
     if today < habit.created {
         return Streak {
             length: 0,
@@ -87,8 +115,8 @@ pub fn current_streak(habit: &Habit, log: &Log, today: NaiveDate, week_start: Da
         };
     }
     match habit.schedule {
-        Schedule::TimesPerWeek { n } => weekly_streak(habit, log, today, week_start, n),
-        _ => daily_streak(habit, log, today),
+        Schedule::TimesPerWeek { n } => weekly_streak(habit, history, today, week_start, n),
+        _ => daily_streak(habit, history, today),
     }
 }
 
@@ -99,16 +127,18 @@ fn streak_unit(schedule: &Schedule) -> Unit {
     }
 }
 
-fn daily_streak(habit: &Habit, log: &Log, today: NaiveDate) -> Streak {
+fn daily_streak(habit: &Habit, history: &History, today: NaiveDate) -> Streak {
     let mut length = 0;
-    let mut date = today;
+    let mut date = scope_end(habit, today);
     let mut walked = 0u32;
-    let floor = history_start(habit, log);
+    let floor = history_start(habit, history);
 
     while date >= floor && walked < 20_000 {
-        if habit.schedule.is_due(date) {
-            if log.is_done(date, &habit.id) {
+        if habit.schedule.is_due(date) && habit.is_active_on(date) {
+            if history.log.is_done(date, &habit.id) {
                 length += 1;
+            } else if history.cheats.is_excused(date, &habit.id) {
+                // Excused: skipped, exactly like a day that is not due.
             } else if date != today {
                 // Today is still in progress; yesterday and before must be done.
                 break;
@@ -126,22 +156,29 @@ fn daily_streak(habit: &Habit, log: &Log, today: NaiveDate) -> Streak {
 
 fn weekly_streak(
     habit: &Habit,
-    log: &Log,
+    history: &History,
     today: NaiveDate,
     week_start: Day,
     target: u8,
 ) -> Streak {
+    let last_day = scope_end(habit, today);
     let this_week = start_of_week(today, week_start);
-    let first_week = start_of_week(history_start(habit, log), week_start);
+    let last_week = start_of_week(last_day, week_start);
+    let first_week = start_of_week(history_start(habit, history), week_start);
     let mut length = 0;
-    let mut week = this_week;
+    let mut week = last_week;
     let mut walked = 0u32;
 
     while week >= first_week && walked < 2_000 {
-        let done = log.count_between(&habit.id, week, week + Duration::days(6));
+        let done = history.log.count_between(
+            &habit.id,
+            week.max(habit.created),
+            (week + Duration::days(6)).min(last_day),
+        );
         if done >= u32::from(target) {
             length += 1;
-        } else if week != this_week {
+        } else if week != this_week && week != last_week {
+            // The current week (or the week a habit ended in) is still in progress.
             break;
         }
         week -= Duration::days(7);
@@ -154,25 +191,35 @@ fn weekly_streak(
     }
 }
 
-pub fn longest_streak(habit: &Habit, log: &Log, today: NaiveDate, week_start: Day) -> Streak {
+pub fn longest_streak(
+    habit: &Habit,
+    history: &History,
+    today: NaiveDate,
+    week_start: Day,
+) -> Streak {
     if today < habit.created {
         return Streak {
             length: 0,
             unit: streak_unit(&habit.schedule),
         };
     }
+    let last_day = scope_end(habit, today);
     match habit.schedule {
         Schedule::TimesPerWeek { n } => {
-            let this_week = start_of_week(today, week_start);
-            let mut week = start_of_week(history_start(habit, log), week_start);
+            let last_week = start_of_week(last_day, week_start);
+            let mut week = start_of_week(history_start(habit, history), week_start);
             let (mut best, mut current) = (0, 0);
             let mut walked = 0u32;
-            while week <= this_week && walked < 2_000 {
-                let done = log.count_between(&habit.id, week, week + Duration::days(6));
+            while week <= last_week && walked < 2_000 {
+                let done = history.log.count_between(
+                    &habit.id,
+                    week.max(habit.created),
+                    (week + Duration::days(6)).min(last_day),
+                );
                 if done >= u32::from(n) {
                     current += 1;
                     best = best.max(current);
-                } else if week != this_week {
+                } else if week != last_week {
                     current = 0;
                 }
                 week += Duration::days(7);
@@ -184,14 +231,16 @@ pub fn longest_streak(habit: &Habit, log: &Log, today: NaiveDate, week_start: Da
             }
         }
         _ => {
-            let mut date = history_start(habit, log);
+            let mut date = history_start(habit, history);
             let (mut best, mut current) = (0, 0);
             let mut walked = 0u32;
-            while date <= today && walked < 20_000 {
-                if habit.schedule.is_due(date) {
-                    if log.is_done(date, &habit.id) {
+            while date <= last_day && walked < 20_000 {
+                if habit.schedule.is_due(date) && habit.is_active_on(date) {
+                    if history.log.is_done(date, &habit.id) {
                         current += 1;
                         best = best.max(current);
+                    } else if history.cheats.is_excused(date, &habit.id) {
+                        // Excused days bridge a run instead of ending it.
                     } else if date != today {
                         current = 0;
                     }
@@ -223,32 +272,35 @@ impl Completion {
     }
 }
 
-/// Completion rate over the last `days` days, clamped to the habit's lifetime.
+/// Completion rate over the last `days` days, clamped to the habit's window.
 pub fn completion(
     habit: &Habit,
-    log: &Log,
+    history: &History,
     today: NaiveDate,
     week_start: Day,
     days: u32,
 ) -> Completion {
-    let from = (today - Duration::days(i64::from(days.max(1)) - 1)).max(history_start(habit, log));
-    if from > today {
+    let last_day = scope_end(habit, today);
+    let from = (today - Duration::days(i64::from(days.max(1)) - 1))
+        .max(history_start(habit, history))
+        .max(habit.created);
+    if from > last_day {
         return Completion::default();
     }
 
     match habit.schedule {
         Schedule::TimesPerWeek { n } => {
             let first_week = start_of_week(from, week_start);
-            let last_week = start_of_week(today, week_start);
+            let last_week = start_of_week(last_day, week_start);
             let mut done = 0;
             let mut possible = 0;
             let mut week = first_week;
             let mut walked = 0u32;
             while week <= last_week && walked < 2_000 {
-                done += log.count_between(
+                done += history.log.count_between(
                     &habit.id,
                     week.max(from),
-                    (week + Duration::days(6)).min(today),
+                    (week + Duration::days(6)).min(last_day),
                 );
                 possible += u32::from(n);
                 week += Duration::days(7);
@@ -260,11 +312,16 @@ pub fn completion(
             let mut done = 0;
             let mut possible = 0;
             let mut date = from;
-            while date <= today {
-                if habit.schedule.is_due(date) {
-                    possible += 1;
-                    if log.is_done(date, &habit.id) {
-                        done += 1;
+            while date <= last_day {
+                if habit.schedule.is_due(date) && habit.is_active_on(date) {
+                    // An excused day cannot be failed, so it is not a possible day.
+                    if history.cheats.is_excused(date, &habit.id) {
+                        // counted as neither done nor possible
+                    } else {
+                        possible += 1;
+                        if history.log.is_done(date, &habit.id) {
+                            done += 1;
+                        }
                     }
                 }
                 date += Duration::days(1);
@@ -277,32 +334,49 @@ pub fn completion(
 /// Progress toward this week's quota, for quota-based habits.
 pub fn weekly_progress(
     habit: &Habit,
-    log: &Log,
+    history: &History,
     today: NaiveDate,
     week_start: Day,
 ) -> Option<(u32, u8)> {
     let Schedule::TimesPerWeek { n } = habit.schedule else {
         return None;
     };
-    let week = start_of_week(today, week_start);
-    let done = log.count_between(&habit.id, week, week + Duration::days(6));
+    let last_day = scope_end(habit, today);
+    // A finished habit keeps showing the week it ended in.
+    let week = start_of_week(last_day, week_start);
+    let done = history.log.count_between(
+        &habit.id,
+        week.max(habit.created),
+        (week + Duration::days(6)).min(last_day),
+    );
     Some((done, n))
 }
 
 /// Done vs. target for the week containing `today` (quota habits use their quota).
-pub fn week_progress(habit: &Habit, log: &Log, today: NaiveDate, week_start: Day) -> (u32, u8) {
-    if let Some(progress) = weekly_progress(habit, log, today, week_start) {
+pub fn week_progress(
+    habit: &Habit,
+    history: &History,
+    today: NaiveDate,
+    week_start: Day,
+) -> (u32, u8) {
+    if let Some(progress) = weekly_progress(habit, history, today, week_start) {
         return progress;
     }
-    let week = start_of_week(today, week_start);
+    let last_day = scope_end(habit, today);
+    // A finished habit keeps showing the week it ended in.
+    let week = start_of_week(last_day, week_start);
     let mut target = 0u8;
     let mut done = 0u32;
     let mut date = week;
-    while date <= today {
-        if habit.schedule.is_due(date) {
-            target += 1;
-            if log.is_done(date, &habit.id) {
+    while date <= last_day {
+        if habit.schedule.is_due(date) && habit.is_active_on(date) {
+            if history.log.is_done(date, &habit.id) {
+                target += 1;
                 done += 1;
+            } else if history.cheats.is_excused(date, &habit.id) {
+                // An excused day is not required, so it is not a target either.
+            } else {
+                target += 1;
             }
         }
         date += Duration::days(1);
@@ -313,7 +387,7 @@ pub fn week_progress(habit: &Habit, log: &Log, today: NaiveDate, week_start: Day
 /// `[day_of_week][week]`, oldest week first, last column is the current week.
 pub fn heatmap(
     habit: &Habit,
-    log: &Log,
+    history: &History,
     today: NaiveDate,
     week_start: Day,
     weeks: u32,
@@ -329,9 +403,36 @@ pub fn heatmap(
                     let date = first_week
                         + Duration::days(7 * i64::from(column))
                         + Duration::days(row as i64);
-                    (date, status_on(habit, log, date, today))
+                    (date, status_on(habit, history, date, today))
                 })
                 .collect()
+        })
+        .collect()
+}
+
+/// Rolling 7-day completion ending on each of the last `days` days.
+///
+/// Values are `0.0..=1.0`, ready to be drawn as a sparkline. Days with nothing
+/// scheduled report `0.0`.
+pub fn trend(
+    habit: &Habit,
+    history: &History,
+    today: NaiveDate,
+    week_start: Day,
+    days: u32,
+) -> Vec<f64> {
+    let days = days.clamp(2, 180);
+    (0..days)
+        .rev()
+        .map(|back| {
+            let date = today - Duration::days(i64::from(back));
+            let window = completion(habit, history, date, week_start, 7);
+            if window.possible == 0 {
+                0.0
+            } else {
+                // Extra check-ins can beat a quota; the trend caps at 100%.
+                (f64::from(window.done) / f64::from(window.possible)).min(1.0)
+            }
         })
         .collect()
 }
@@ -339,70 +440,103 @@ pub fn heatmap(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::Day;
+    use crate::model::{Cheats, Log};
+    use chrono::NaiveDate;
     use std::collections::BTreeSet;
 
     fn date(text: &str) -> NaiveDate {
         NaiveDate::parse_from_str(text, "%Y-%m-%d").unwrap()
     }
 
-    fn habit(schedule: Schedule, created: &str) -> Habit {
-        Habit::new("h".into(), "Habit".into(), schedule, date(created))
+    struct Fixture {
+        habit: Habit,
+        log: Log,
+        cheats: Cheats,
     }
 
-    /// Mark a habit done on each date in `dates`.
-    fn log_done(dates: &[&str]) -> Log {
-        let mut log = Log::default();
-        for day in dates {
-            log.set(date(day), "h", true);
+    impl Fixture {
+        fn new(schedule: Schedule, created: &str) -> Self {
+            Self {
+                habit: Habit::new("h".into(), "Habit".into(), schedule, date(created)),
+                log: Log::default(),
+                cheats: Cheats::default(),
+            }
         }
-        log
+
+        fn done(mut self, dates: &[&str]) -> Self {
+            for day in dates {
+                self.log.set(date(day), "h", true);
+            }
+            self
+        }
+
+        fn cheat(mut self, dates: &[&str]) -> Self {
+            for day in dates {
+                self.cheats.set(date(day), "h", true);
+            }
+            self
+        }
+
+        fn ends(mut self, ends: &str) -> Self {
+            self.habit.ends = Some(date(ends));
+            self
+        }
+
+        fn history(&self) -> History<'_> {
+            History {
+                log: &self.log,
+                cheats: &self.cheats,
+            }
+        }
     }
 
     #[test]
     fn daily_streak_counts_consecutive_days() {
-        let habit = habit(Schedule::Daily, "2026-11-01");
-        let log = log_done(&["2026-11-08", "2026-11-09", "2026-11-10"]);
-        let streak = current_streak(&habit, &log, date("2026-11-10"), Day::Mon);
+        let f = Fixture::new(Schedule::Daily, "2026-11-01").done(&[
+            "2026-11-08",
+            "2026-11-09",
+            "2026-11-10",
+        ]);
+        let streak = current_streak(&f.habit, &f.history(), date("2026-11-10"), Day::Mon);
         assert_eq!(streak.length, 3);
         assert_eq!(streak.unit, Unit::Days);
     }
 
     #[test]
     fn today_not_done_keeps_yesterdays_streak_alive() {
-        let habit = habit(Schedule::Daily, "2026-11-01");
-        let log = log_done(&["2026-11-08", "2026-11-09"]);
-        let streak = current_streak(&habit, &log, date("2026-11-10"), Day::Mon);
+        let f = Fixture::new(Schedule::Daily, "2026-11-01").done(&["2026-11-08", "2026-11-09"]);
+        let streak = current_streak(&f.habit, &f.history(), date("2026-11-10"), Day::Mon);
         assert_eq!(streak.length, 2);
     }
 
     #[test]
     fn missing_a_past_day_breaks_the_streak() {
-        let habit = habit(Schedule::Daily, "2026-11-01");
-        let log = log_done(&["2026-11-05", "2026-11-07", "2026-11-08"]);
-        let streak = current_streak(&habit, &log, date("2026-11-10"), Day::Mon);
+        let f = Fixture::new(Schedule::Daily, "2026-11-01").done(&[
+            "2026-11-05",
+            "2026-11-07",
+            "2026-11-08",
+        ]);
+        let streak = current_streak(&f.habit, &f.history(), date("2026-11-10"), Day::Mon);
         assert_eq!(streak.length, 0, "the 9th and 10th are missing");
     }
 
     #[test]
     fn weekday_habits_skip_days_that_are_not_due() {
         // Mon/Wed/Fri habit: 2026-11-09 Mon, 11 Wed, 13 Fri.
-        let habit = habit(
+        let f = Fixture::new(
             Schedule::Weekdays {
                 days: BTreeSet::from([Day::Mon, Day::Wed, Day::Fri]),
             },
             "2026-11-01",
-        );
-        let log = log_done(&["2026-11-06", "2026-11-09", "2026-11-11"]);
-        let streak = current_streak(&habit, &log, date("2026-11-11"), Day::Mon);
+        )
+        .done(&["2026-11-06", "2026-11-09", "2026-11-11"]);
+        let streak = current_streak(&f.habit, &f.history(), date("2026-11-11"), Day::Mon);
         assert_eq!(streak.length, 3, "Tue/Thu/Sat/Sun do not break it");
     }
 
     #[test]
     fn weekly_quota_habit_counts_weeks_not_days() {
-        // 4×/week habit, week of 2026-11-09 (Mon start).
-        let habit = habit(Schedule::TimesPerWeek { n: 4 }, "2026-10-01");
-        let log = log_done(&[
+        let f = Fixture::new(Schedule::TimesPerWeek { n: 4 }, "2026-10-01").done(&[
             "2026-11-02",
             "2026-11-04",
             "2026-11-06",
@@ -412,15 +546,14 @@ mod tests {
             "2026-11-11",
             "2026-11-12", // this week: 4
         ]);
-        let streak = current_streak(&habit, &log, date("2026-11-13"), Day::Mon);
+        let streak = current_streak(&f.habit, &f.history(), date("2026-11-13"), Day::Mon);
         assert_eq!(streak.length, 2);
         assert_eq!(streak.unit, Unit::Weeks);
     }
 
     #[test]
     fn weekly_quota_with_three_of_four_does_not_count_but_does_not_break() {
-        let habit = habit(Schedule::TimesPerWeek { n: 4 }, "2026-10-01");
-        let log = log_done(&[
+        let f = Fixture::new(Schedule::TimesPerWeek { n: 4 }, "2026-10-01").done(&[
             "2026-11-02",
             "2026-11-04",
             "2026-11-06",
@@ -430,19 +563,16 @@ mod tests {
             "2026-11-10",
             "2026-11-11",
         ]);
-        let streak = current_streak(&habit, &log, date("2026-11-12"), Day::Mon);
-        assert_eq!(
-            streak.length, 1,
-            "the in-progress week is skipped, not fatal"
-        );
-        let (done, target) = weekly_progress(&habit, &log, date("2026-11-12"), Day::Mon).unwrap();
+        let streak = current_streak(&f.habit, &f.history(), date("2026-11-12"), Day::Mon);
+        assert_eq!(streak.length, 1, "the in-progress week is skipped");
+        let (done, target) =
+            weekly_progress(&f.habit, &f.history(), date("2026-11-12"), Day::Mon).unwrap();
         assert_eq!((done, target), (3, 4));
     }
 
     #[test]
     fn longest_streak_looks_beyond_the_current_run() {
-        let habit = habit(Schedule::Daily, "2026-11-01");
-        let log = log_done(&[
+        let f = Fixture::new(Schedule::Daily, "2026-11-01").done(&[
             "2026-11-03",
             "2026-11-04",
             "2026-11-05",
@@ -450,15 +580,14 @@ mod tests {
             "2026-11-07",
             "2026-11-10",
         ]);
-        let longest = longest_streak(&habit, &log, date("2026-11-10"), Day::Mon);
+        let longest = longest_streak(&f.habit, &f.history(), date("2026-11-10"), Day::Mon);
         assert_eq!(longest.length, 5);
     }
 
     #[test]
     fn completion_ignores_days_before_creation() {
-        let habit = habit(Schedule::Daily, "2026-11-08");
-        let log = log_done(&["2026-11-08", "2026-11-10"]);
-        let completion = completion(&habit, &log, date("2026-11-10"), Day::Mon, 30);
+        let f = Fixture::new(Schedule::Daily, "2026-11-08").done(&["2026-11-08", "2026-11-10"]);
+        let completion = completion(&f.habit, &f.history(), date("2026-11-10"), Day::Mon, 30);
         assert_eq!(completion.done, 2);
         assert_eq!(completion.possible, 3);
         assert_eq!(completion.percent(), 66);
@@ -466,12 +595,10 @@ mod tests {
 
     #[test]
     fn heatmap_last_column_contains_today() {
-        let habit = habit(Schedule::Daily, "2026-01-01");
-        let log = log_done(&["2026-11-10"]);
-        let grid = heatmap(&habit, &log, date("2026-11-10"), Day::Mon, 5);
+        let f = Fixture::new(Schedule::Daily, "2026-01-01").done(&["2026-11-10"]);
+        let grid = heatmap(&f.habit, &f.history(), date("2026-11-10"), Day::Mon, 5);
         assert_eq!(grid.len(), 7);
         assert_eq!(grid[0].len(), 5);
-        // Monday row, last column is the current week, so 2026-11-09.
         assert_eq!(grid[0][4].0, date("2026-11-09"));
         assert_eq!(grid[1][4].0, date("2026-11-10"));
         assert_eq!(grid[1][4].1, Status::Done);
@@ -479,65 +606,284 @@ mod tests {
 
     #[test]
     fn heatmap_rows_follow_the_configured_week_start() {
-        let habit = habit(Schedule::Daily, "2026-01-01");
-        let log = log_done(&["2026-11-10"]);
-        let grid = heatmap(&habit, &log, date("2026-11-10"), Day::Sun, 2);
+        let f = Fixture::new(Schedule::Daily, "2026-01-01").done(&["2026-11-10"]);
+        let grid = heatmap(&f.habit, &f.history(), date("2026-11-10"), Day::Sun, 2);
         assert_eq!(grid[0][1].0, date("2026-11-08"), "first row is Sunday");
         assert_eq!(grid[2][1].0, date("2026-11-10"), "Tuesday is offset 2");
     }
 
     #[test]
     fn status_marks_future_and_not_due() {
-        let habit = habit(
+        let f = Fixture::new(
             Schedule::Weekdays {
                 days: BTreeSet::from([Day::Mon]),
             },
             "2026-01-01",
-        );
-        let log = log_done(&["2026-11-09"]);
+        )
+        .done(&["2026-11-09"]);
         assert_eq!(
-            status_on(&habit, &log, date("2026-11-10"), date("2026-11-10")),
+            status_on(
+                &f.habit,
+                &f.history(),
+                date("2026-11-10"),
+                date("2026-11-10")
+            ),
             Status::NotDue
         );
         assert_eq!(
-            status_on(&habit, &log, date("2026-11-16"), date("2026-11-10")),
+            status_on(
+                &f.habit,
+                &f.history(),
+                date("2026-11-16"),
+                date("2026-11-10")
+            ),
             Status::Future
         );
         assert_eq!(
-            status_on(&habit, &log, date("2026-11-02"), date("2026-11-10")),
+            status_on(
+                &f.habit,
+                &f.history(),
+                date("2026-11-02"),
+                date("2026-11-10")
+            ),
+            Status::Missed
+        );
+    }
+
+    #[test]
+    fn today_that_is_not_done_yet_is_pending_not_missed() {
+        let f = Fixture::new(Schedule::Daily, "2026-11-01");
+        assert_eq!(
+            status_on(
+                &f.habit,
+                &f.history(),
+                date("2026-11-10"),
+                date("2026-11-10")
+            ),
+            Status::Pending
+        );
+        assert_eq!(
+            status_on(
+                &f.habit,
+                &f.history(),
+                date("2026-11-09"),
+                date("2026-11-10")
+            ),
             Status::Missed
         );
     }
 
     #[test]
     fn days_before_creation_are_not_missed() {
-        let habit = habit(Schedule::Daily, "2026-11-09");
-        let log = Log::default();
+        let f = Fixture::new(Schedule::Daily, "2026-11-09");
         assert_eq!(
-            status_on(&habit, &log, date("2026-11-05"), date("2026-11-10")),
+            status_on(
+                &f.habit,
+                &f.history(),
+                date("2026-11-05"),
+                date("2026-11-10")
+            ),
             Status::NotDue
         );
         assert_eq!(
-            status_on(&habit, &log, date("2026-11-09"), date("2026-11-10")),
+            status_on(
+                &f.habit,
+                &f.history(),
+                date("2026-11-09"),
+                date("2026-11-10")
+            ),
             Status::Missed
         );
     }
 
     #[test]
     fn no_history_scores_zero_without_panicking() {
-        let habit = habit(Schedule::Daily, "2026-11-10");
-        let log = Log::default();
+        let f = Fixture::new(Schedule::Daily, "2026-11-10");
         assert_eq!(
-            current_streak(&habit, &log, date("2026-11-10"), Day::Mon).length,
+            current_streak(&f.habit, &f.history(), date("2026-11-10"), Day::Mon).length,
             0
         );
         assert_eq!(
-            longest_streak(&habit, &log, date("2026-11-10"), Day::Mon).length,
+            longest_streak(&f.habit, &f.history(), date("2026-11-10"), Day::Mon).length,
             0
         );
         assert_eq!(
-            completion(&habit, &log, date("2026-11-10"), Day::Mon, 30).possible,
+            completion(&f.habit, &f.history(), date("2026-11-10"), Day::Mon, 30).possible,
             1
         );
+    }
+
+    #[test]
+    fn one_cheat_day_a_month_bridges_a_streak() {
+        // Done 1-7, cheat on the 8th, done 9-10.
+        let f = Fixture::new(Schedule::Daily, "2026-11-01")
+            .done(&[
+                "2026-11-01",
+                "2026-11-02",
+                "2026-11-03",
+                "2026-11-04",
+                "2026-11-05",
+                "2026-11-06",
+                "2026-11-07",
+                "2026-11-09",
+                "2026-11-10",
+            ])
+            .cheat(&["2026-11-08"]);
+        let streak = current_streak(&f.habit, &f.history(), date("2026-11-10"), Day::Mon);
+        assert_eq!(streak.length, 9, "the cheat day is skipped, not counted");
+        assert_eq!(
+            status_on(
+                &f.habit,
+                &f.history(),
+                date("2026-11-08"),
+                date("2026-11-10")
+            ),
+            Status::Cheat
+        );
+    }
+
+    #[test]
+    fn a_second_cheat_in_the_same_month_breaks_the_streak() {
+        let f = Fixture::new(Schedule::Daily, "2026-11-01")
+            .done(&["2026-11-01", "2026-11-02"])
+            .cheat(&["2026-11-03", "2026-11-04"])
+            .done(&["2026-11-05", "2026-11-06"]);
+        let streak = current_streak(&f.habit, &f.history(), date("2026-11-06"), Day::Mon);
+        assert_eq!(streak.length, 2, "the second cheat is an ordinary miss");
+        assert_eq!(
+            status_on(
+                &f.habit,
+                &f.history(),
+                date("2026-11-04"),
+                date("2026-11-06")
+            ),
+            Status::Missed
+        );
+    }
+
+    #[test]
+    fn cheats_do_not_count_as_completions() {
+        let f = Fixture::new(Schedule::Daily, "2026-11-01").cheat(&["2026-11-01"]);
+        let completion = completion(&f.habit, &f.history(), date("2026-11-02"), Day::Mon, 30);
+        assert_eq!(completion.done, 0);
+        assert_eq!(completion.possible, 1, "the excused day is skipped");
+    }
+
+    #[test]
+    fn an_end_date_freezes_the_streak() {
+        let f = Fixture::new(Schedule::Daily, "2026-11-01")
+            .done(&["2026-11-01", "2026-11-02", "2026-11-03"])
+            .ends("2026-11-03");
+        // A week later the last day is still the one that decides the streak.
+        let streak = current_streak(&f.habit, &f.history(), date("2026-11-10"), Day::Mon);
+        assert_eq!(streak.length, 3);
+        assert_eq!(
+            status_on(
+                &f.habit,
+                &f.history(),
+                date("2026-11-05"),
+                date("2026-11-10")
+            ),
+            Status::NotDue
+        );
+    }
+
+    #[test]
+    fn a_finished_habit_still_counts_a_missed_last_day() {
+        let f = Fixture::new(Schedule::Daily, "2026-11-01")
+            .done(&["2026-11-01", "2026-11-02"])
+            .ends("2026-11-05");
+        // The 3rd-5th were inside the window and missed, so the run is over.
+        let streak = current_streak(&f.habit, &f.history(), date("2026-11-10"), Day::Mon);
+        assert_eq!(streak.length, 0);
+    }
+
+    #[test]
+    fn completion_stops_at_the_end_date() {
+        let f = Fixture::new(Schedule::Daily, "2026-11-01")
+            .done(&["2026-11-01", "2026-11-02"])
+            .ends("2026-11-02");
+        let completion = completion(&f.habit, &f.history(), date("2026-11-10"), Day::Mon, 30);
+        assert_eq!(completion.possible, 2);
+        assert_eq!(completion.percent(), 100);
+    }
+
+    #[test]
+    fn week_progress_stops_at_the_end_date() {
+        let f = Fixture::new(Schedule::Daily, "2026-11-01")
+            .done(&["2026-11-02"])
+            .ends("2026-11-03");
+        // Week of 2026-11-02: only Monday and Tuesday are inside the window.
+        let (done, target) = week_progress(&f.habit, &f.history(), date("2026-11-10"), Day::Mon);
+        assert_eq!((done, target), (1, 2));
+    }
+
+    #[test]
+    fn weekly_streak_does_not_break_because_the_habit_ended_mid_week() {
+        let f = Fixture::new(Schedule::TimesPerWeek { n: 2 }, "2026-10-01")
+            .done(&[
+                "2026-10-26",
+                "2026-10-28", // full week
+                "2026-11-02",
+                "2026-11-04", // full week
+                "2026-11-09", // ends mid-week
+            ])
+            .ends("2026-11-10");
+        let streak = current_streak(&f.habit, &f.history(), date("2026-11-20"), Day::Mon);
+        assert_eq!(streak.length, 2, "the partial final week is not fatal");
+    }
+
+    #[test]
+    fn week_progress_does_not_require_an_excused_day() {
+        let f = Fixture::new(Schedule::Daily, "2026-11-09")
+            .done(&["2026-11-09"])
+            .cheat(&["2026-11-10"]);
+        let (done, target) = week_progress(&f.habit, &f.history(), date("2026-11-10"), Day::Mon);
+        assert_eq!(
+            (done, target),
+            (1, 1),
+            "the cheat is neither done nor required"
+        );
+    }
+
+    #[test]
+    fn trend_caps_a_beaten_quota_at_one() {
+        let f = Fixture::new(Schedule::TimesPerWeek { n: 1 }, "2026-11-01").done(&[
+            "2026-11-04",
+            "2026-11-05",
+            "2026-11-06",
+            "2026-11-07",
+            "2026-11-08",
+            "2026-11-09",
+            "2026-11-10",
+        ]);
+        let series = trend(&f.habit, &f.history(), date("2026-11-10"), Day::Mon, 3);
+        assert!(series.iter().all(|value| *value <= 1.0), "{series:?}");
+        assert_eq!(series[2], 1.0);
+    }
+
+    #[test]
+    fn trend_series_is_a_rolling_completion_rate() {
+        let f = Fixture::new(Schedule::Daily, "2026-11-01").done(&[
+            "2026-11-04",
+            "2026-11-05",
+            "2026-11-06",
+            "2026-11-07",
+            "2026-11-08",
+            "2026-11-09",
+            "2026-11-10",
+        ]);
+        let series = trend(&f.habit, &f.history(), date("2026-11-10"), Day::Mon, 4);
+        assert_eq!(series.len(), 4);
+        assert!((series[0] - 4.0 / 7.0).abs() < 1e-9);
+        assert!((series[3] - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn trend_is_quiet_before_a_habit_exists() {
+        let f = Fixture::new(Schedule::Daily, "2026-11-10");
+        let series = trend(&f.habit, &f.history(), date("2026-11-10"), Day::Mon, 5);
+        assert_eq!(series.len(), 5);
+        assert!(series[..4].iter().all(|value| *value == 0.0));
     }
 }

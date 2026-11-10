@@ -1,9 +1,9 @@
 [package]
 name = "habit"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.88"
-description = "A calm habit tracker for the terminal: streaks, weekly quotas, heatmaps, plain JSON"
+description = "A calm terminal habit tracker: streaks, quotas, cheat days, tags, notes, plain JSON"
 license = "MIT"
 repository = "https://github.com/Vulkan1125/habit-tracker.git"
 homepage = "https://github.com/Vulkan1125/habit-tracker"

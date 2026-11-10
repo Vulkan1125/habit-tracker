@@ -27,11 +27,18 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
     } else {
         format!(" Habits · {} ", indices.len())
     };
+    let title_style = if app.filter.is_empty() {
+        Style::default().fg(theme.dim)
+    } else {
+        Style::default().fg(theme.accent)
+    };
 
     let mut items: Vec<ListItem> = Vec::with_capacity(indices.len().max(1));
     if indices.is_empty() {
         let message = if app.data.habits.is_empty() {
             "No habits yet — press a to add the first one"
+        } else if app.filter.is_empty() {
+            "Nothing to show"
         } else {
             "Nothing matches that filter"
         };
@@ -49,13 +56,23 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
         }
     }
 
+    let highlight = match theme.surface {
+        Some(surface) => Style::default()
+            .bg(surface)
+            .fg(theme.fg)
+            .add_modifier(Modifier::BOLD),
+        None => Style::default().add_modifier(Modifier::BOLD),
+    };
+
     let list = List::new(items)
         .block(
             Block::bordered()
-                .title(title)
-                .border_style(Style::default().fg(theme.border)),
+                .title(Line::from(Span::styled(title, title_style)))
+                .border_style(Style::default().fg(theme.border))
+                .style(theme.base()),
         )
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+        .style(theme.base())
+        .highlight_style(highlight)
         .highlight_symbol("▸ ");
 
     app.list_state.select(if indices.is_empty() {
@@ -68,33 +85,39 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
 
 fn row(habit: &Habit, app: &App, inner_width: usize) -> Line<'static> {
     let theme = app.theme;
-    let done = app.data.log.is_done(app.today, &habit.id);
-    let due = habit.schedule.is_due(app.today);
+    let date = app.view_date;
+    let done = app.data.log.is_done(date, &habit.id);
+    let excused = app.data.cheats.is_excused(date, &habit.id);
+    let due = habit.schedule.is_due(date) && habit.is_active_on(date);
+    let closed = habit.archived || habit.is_finished(app.today);
 
-    let (marker, marker_style) = if habit.archived {
+    let (marker, marker_style) = if closed {
         ("·", Style::default().fg(theme.dim))
     } else if done {
         ("●", Style::default().fg(theme.done))
+    } else if excused {
+        ("◆", Style::default().fg(theme.cheat))
     } else if due {
         ("○", Style::default().fg(theme.warn))
     } else {
         ("·", Style::default().fg(theme.dim))
     };
 
-    let schedule = match stats::weekly_progress(habit, &app.data.log, app.today, app.week_start) {
-        Some((done, target)) => format!("{done}/{target} wk"),
-        None => habit.schedule.describe(),
-    };
+    let schedule =
+        match stats::weekly_progress(habit, &app.data.history(), app.today, app.week_start) {
+            Some((done, target)) => format!("{done}/{target} wk"),
+            None => habit.schedule.describe(),
+        };
     let show_schedule = inner_width >= 34;
     let schedule_width = if show_schedule { 13 } else { 0 };
     let name_width = inner_width
         .saturating_sub(2 + schedule_width + DOTS_WIDTH)
         .max(4);
 
-    let name_style = if habit.archived {
+    let name_style = if closed {
         Style::default().fg(theme.dim)
     } else {
-        Style::default()
+        Style::default().fg(theme.fg)
     };
 
     let mut spans = vec![
@@ -110,12 +133,13 @@ fn row(habit: &Habit, app: &App, inner_width: usize) -> Line<'static> {
         ));
     }
 
-    for (_, status) in stats::recent(habit, &app.data.log, app.today, DOTS) {
+    for (_, status) in stats::recent(habit, &app.data.history(), date, DOTS) {
         let (glyph, style) = match status {
             Status::Done => ("●", Style::default().fg(theme.done)),
+            Status::Cheat => ("◆", Style::default().fg(theme.cheat)),
             Status::Missed => ("○", Style::default().fg(theme.missed)),
-            Status::NotDue => ("·", Style::default().fg(theme.dim)),
-            Status::Future => ("·", Style::default().fg(theme.dim)),
+            Status::Pending => ("◌", Style::default().fg(theme.warn)),
+            Status::NotDue | Status::Future => ("·", Style::default().fg(theme.dim)),
         };
         spans.push(Span::styled(glyph, style));
     }
