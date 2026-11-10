@@ -8,6 +8,23 @@ All notable changes to `habit` are recorded here. The format follows
 
 Nothing yet.
 
+## [0.2.1] — 2026-11-10
+
+### Added
+
+- **Theme shortcuts in the TUI**: `T` steps to the next palette and `m` toggles dark/light. The
+  choice is written back to `config.toml`, so it survives a restart, and both keys are listed in
+  the help overlay. Previously themes could only be changed by editing the config file.
+
+### Changed
+
+- Test count is now **119**; README, help overlay and docs cover the new keys.
+
+### Fixed
+
+- `cargo install --path .` is the supported way to update an existing install; the 0.2.0 notes did
+  not mention that an older binary on `PATH` keeps showing the old UI.
+
 ## [0.2.0] — 2026-11-10
 
 The feature release: habits gain a lifetime, cheat days, tags, notes, a trend line, date
@@ -89,6 +106,7 @@ First release.
   failure modes, form validation and TUI rendering via `TestBackend`.
 - CI on Linux and macOS (format, clippy, tests, MSRV 1.88) and a release profile with LTO + strip.
 
-[Unreleased]: https://github.com/Vulkan1125/habit-tracker/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Vulkan1125/habit-tracker/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.2.1
 [0.2.0]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.1.0

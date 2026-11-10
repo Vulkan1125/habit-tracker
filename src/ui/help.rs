@@ -22,6 +22,8 @@ const KEYS: &[(&str, &str)] = &[
     ("x", "delete (asks first)"),
     ("u", "undo the last change"),
     ("/", "filter by text, tag or #tag"),
+    ("T", "next colour theme"),
+    ("m", "dark / light mode"),
     ("r", "reload the file from disk"),
     ("?", "this help"),
     ("q", "quit"),

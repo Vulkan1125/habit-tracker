@@ -11,7 +11,7 @@ use crate::config::Config;
 use crate::model::{Data, Day, Habit};
 use crate::stats;
 use crate::store::Store;
-use crate::theme::Theme;
+use crate::theme::{ColorMode, Theme, ThemeName};
 use crate::ui::form::{Form, FormAction};
 
 pub enum Mode {
@@ -44,6 +44,7 @@ pub struct App {
     /// The day the cursor and the check-off keys act on.
     pub view_date: NaiveDate,
     pub week_start: Day,
+    pub config: Config,
     pub theme: Theme,
     pub cursor: usize,
     pub list_state: ListState,
@@ -63,6 +64,7 @@ impl App {
             today,
             view_date: today,
             week_start: config.week_start,
+            config: config.clone(),
             theme: config.palette(),
             cursor: 0,
             list_state: ListState::default(),
@@ -175,6 +177,8 @@ impl App {
                 self.filter.clear();
                 self.cursor = 0;
             }
+            KeyCode::Char('T') => self.cycle_theme(),
+            KeyCode::Char('m') => self.toggle_mode(),
             KeyCode::Char('r') => self.reload(),
             _ => {}
         }
@@ -531,6 +535,41 @@ impl App {
         }
     }
 
+    /// `T`: step to the next palette, keeping the current light/dark mode.
+    fn cycle_theme(&mut self) {
+        let all = ThemeName::ALL;
+        let index = all
+            .iter()
+            .position(|name| *name == self.config.theme)
+            .unwrap_or(0);
+        self.config.theme = all[(index + 1) % all.len()];
+        self.apply_theme();
+    }
+
+    /// `m`: flip between the dark and light variants of the palette.
+    fn toggle_mode(&mut self) {
+        self.config.mode = match self.config.mode {
+            ColorMode::Dark => ColorMode::Light,
+            ColorMode::Light => ColorMode::Dark,
+        };
+        self.apply_theme();
+    }
+
+    /// Rebuild the palette and write the choice back to `config.toml` so it
+    /// survives a restart. A read-only home directory only costs a warning.
+    fn apply_theme(&mut self) {
+        self.theme = self.config.palette();
+        let label = format!(
+            "{} · {}",
+            self.config.theme.label(),
+            self.config.mode.label()
+        );
+        match self.config.save() {
+            Ok(()) => self.flash_ok(format!("theme {label} · saved")),
+            Err(error) => self.flash_warning(format!("theme {label} · not saved: {error}")),
+        }
+    }
+
     fn flash_ok(&mut self, text: impl Into<String>) {
         self.flash = Some(Flash {
             text: text.into(),
@@ -630,6 +669,36 @@ mod tests {
         app.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
             .unwrap();
         assert!(app.quit);
+    }
+
+    #[test]
+    fn t_cycles_the_palette_and_m_flips_the_mode() {
+        let mut app = app();
+        let first = app.config.theme;
+        app.handle_key(KeyEvent::new(KeyCode::Char('T'), KeyModifiers::SHIFT))
+            .unwrap();
+        assert_ne!(app.config.theme, first);
+        assert_eq!(app.theme.name, app.config.theme);
+
+        // Every palette is reachable and wraps back to the first one.
+        for _ in 0..ThemeName::ALL.len() - 1 {
+            app.handle_key(KeyEvent::new(KeyCode::Char('T'), KeyModifiers::SHIFT))
+                .unwrap();
+        }
+        assert_eq!(app.config.theme, first);
+
+        let mode = app.config.mode;
+        app.handle_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE))
+            .unwrap();
+        assert_ne!(app.config.mode, mode);
+        assert_eq!(
+            app.flash.as_ref().unwrap().text,
+            format!(
+                "theme {} · {} · not saved: no config path to write to",
+                first.label(),
+                app.config.mode.label()
+            )
+        );
     }
 
     #[test]

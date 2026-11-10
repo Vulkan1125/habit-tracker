@@ -144,7 +144,7 @@ fn hint(app: &App, max_width: usize) -> String {
             "type to filter · #tag for tags · enter keep · esc clear".to_string()
         }
         Mode::Normal => {
-            let full = "space toggle · c cheat · [ ] day · t today · a add · e edit · d archive · x delete · u undo · / filter · ? help · q quit";
+            let full = "space toggle · c cheat · [ ] day · t today · a add · e edit · d archive · x delete · u undo · / filter · T theme · m mode · ? help · q quit";
             if width(full) <= max_width {
                 return full.to_string();
             }

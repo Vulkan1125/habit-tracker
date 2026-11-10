@@ -141,6 +141,8 @@ and note. Multiple tokens are ANDed, so `run #morning` narrows to morning runs.
 - **One-step undo** for every mutation — check-off, cheat, add, edit, archive and delete.
 - **Archive** instead of delete: history is kept and the habit renders dimmed at the bottom.
 - **Tag-aware filter** (`/`), **help overlay** (`?`), **reload from disk** (`r`).
+- **Theme switching without editing a file**: `T` steps through the seven palettes and `m` flips
+  dark/light; both are written back to `config.toml` immediately.
 - **Responsive**: below 72 columns the detail pane collapses and the list takes the full width.
   Footer hints and the detail legend shorten themselves on narrow terminals.
 
@@ -227,6 +229,12 @@ cargo install --path .
 cargo install --git https://github.com/Vulkan1125/habit-tracker
 ```
 
+Updating an existing install (an older `habit` earlier on `PATH` will otherwise keep running):
+
+```sh
+cargo install --path . --force   # from a clone
+```
+
 Or build and copy the binary yourself:
 
 ```sh
@@ -281,6 +289,8 @@ Nothing else to configure. The data file is created on the first change.
 | `u` | undo the last change |
 | `/` | filter — plain text matches name/id/tags/note, `#tag` matches tags, `enter` keeps, `esc` clears |
 | `r` | reload the data file from disk |
+| `T` | next colour theme (saved to config) |
+| `m` | switch dark / light mode (saved) |
 | `?` | help overlay |
 | `q`, `esc` | quit (first `esc` clears an active filter) |
 
@@ -328,6 +338,8 @@ selection, weekly quota, start date, end date, tags and note.
 │x           delete (asks first)                   │
 │u           undo the last change                  │
 │/           filter by text, tag or #tag           │
+│T           next colour theme                     │
+│m           dark / light mode                     │
 │r           reload the file from disk             │
 │?           this help                             │
 │q           quit                                  │
@@ -540,7 +552,7 @@ A few decisions worth knowing:
 ## Development
 
 ```sh
-cargo test                                  # 115 tests
+cargo test                                  # 119 tests
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 cargo build --release

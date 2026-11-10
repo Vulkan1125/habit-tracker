@@ -14,6 +14,9 @@ pub struct Config {
     pub theme: ThemeName,
     pub mode: ColorMode,
     pub week_start: Day,
+    /// Where this config was loaded from, so the TUI can save theme changes
+    /// back. `None` means "not loaded from a file" (tests, or no home dir).
+    path: Option<PathBuf>,
 }
 
 impl Default for Config {
@@ -22,6 +25,7 @@ impl Default for Config {
             theme: ThemeName::Terminal,
             mode: ColorMode::Dark,
             week_start: Day::Mon,
+            path: None,
         }
     }
 }
@@ -48,22 +52,70 @@ impl Config {
         let raw = match fs::read_to_string(&path) {
             Ok(raw) => raw,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return (Config::default(), None);
+                return (
+                    Config {
+                        path: Some(path),
+                        ..Config::default()
+                    },
+                    None,
+                );
             }
             Err(error) => {
+                let warning = format!("could not read {}: {error}", path.display());
                 return (
-                    Config::default(),
-                    Some(format!("could not read {}: {error}", path.display())),
+                    Config {
+                        path: Some(path),
+                        ..Config::default()
+                    },
+                    Some(warning),
                 );
             }
         };
         match Self::parse(&raw) {
-            Ok(config) => (config, None),
-            Err(error) => (
-                Config::default(),
-                Some(format!("ignoring config {}: {error}", path.display())),
+            Ok(config) => (
+                Config {
+                    path: Some(path),
+                    ..config
+                },
+                None,
             ),
+            Err(error) => {
+                let warning = format!("ignoring config {}: {error}", path.display());
+                (
+                    Config {
+                        path: Some(path),
+                        ..Config::default()
+                    },
+                    Some(warning),
+                )
+            }
         }
+    }
+
+    /// Rewrite the config file with the current theme, mode and week start.
+    ///
+    /// Comments in a hand-written file are not preserved; the file is small and
+    /// the values are what matter. A config that was never loaded from disk
+    /// (for example in tests) is not written anywhere.
+    pub fn save(&self) -> Result<(), String> {
+        let Some(path) = &self.path else {
+            return Err("no config path to write to".to_string());
+        };
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("creating {}: {error}", parent.display()))?;
+        }
+        fs::write(path, self.to_toml())
+            .map_err(|error| format!("writing {}: {error}", path.display()))
+    }
+
+    pub fn to_toml(&self) -> String {
+        format!(
+            "# habit configuration — `T` and `m` in the TUI update these values.\ntheme = \"{}\"\nmode = \"{}\"\nweek_start = \"{}\"\n",
+            self.theme.label(),
+            self.mode.label(),
+            self.week_start.short()
+        )
     }
 
     pub fn parse(raw: &str) -> Result<Config, String> {
@@ -173,5 +225,32 @@ mod tests {
         assert!(error.contains("catppuccin"), "{error}");
         let error = Config::parse("theme = \"mono\"\nmode = \"sepia\"").unwrap_err();
         assert!(error.contains("sepia"), "{error}");
+    }
+
+    #[test]
+    fn to_toml_round_trips_every_field() {
+        let config =
+            Config::parse("theme = \"gruvbox\"\nmode = \"light\"\nweek_start = \"Sun\"").unwrap();
+        let parsed = Config::parse(&config.to_toml()).unwrap();
+        assert_eq!(parsed.theme, ThemeName::Gruvbox);
+        assert_eq!(parsed.mode, ColorMode::Light);
+        assert_eq!(parsed.week_start, Day::Sun);
+    }
+
+    #[test]
+    fn save_writes_the_loaded_path_and_creates_parents() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested").join("config.toml");
+        let mut config = Config::parse("theme = \"evergreen\"\nmode = \"light\"").unwrap();
+        config.path = Some(path.clone());
+        config.save().unwrap();
+        let raw = fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("theme = \"evergreen\""), "{raw}");
+        assert!(raw.contains("mode = \"light\""), "{raw}");
+    }
+
+    #[test]
+    fn saving_without_a_loaded_path_is_an_error_not_a_guess() {
+        assert!(Config::default().save().is_err());
     }
 }
