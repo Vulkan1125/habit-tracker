@@ -249,10 +249,17 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+
+      - name: Add the installer
+        run: cp install.sh dist/install.sh
+
       - name: Checksums
         run: |
           cd dist
-          sha256sum habit-* habit_* > SHA256SUMS
+          sha256sum habit-* habit_* install.sh > SHA256SUMS
           ls -lh
 
       - name: Upload release assets

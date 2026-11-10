@@ -6,7 +6,17 @@ All notable changes to `habit` are recorded here. The format follows
 
 ## [Unreleased]
 
-Nothing yet.
+### Packaging
+
+- **A one-line Linux installer.** `install.sh` (also published as a release asset) resolves the
+  latest tag, downloads the right asset, verifies it against the release's `SHA256SUMS` and then
+  installs the native `.deb` / `.rpm` / `.pkg.tar.zst` with `apt-get`, `dnf` or `pacman`, falling
+  back to the static binary in `~/.local/bin` on other distributions or without root. `--version`,
+  `--package`, `--static`, `--prefix`, `--dry-run` and `--yes` control it.
+- **A Homebrew tap** at [Vulkan1125/homebrew-tap](https://github.com/Vulkan1125/homebrew-tap):
+  `brew install Vulkan1125/tap/habit` installs the universal macOS binary, so nothing is compiled.
+- CI runs `shellcheck` on the installer, and every release now attaches `install.sh` alongside the
+  packages, with `SHA256SUMS` covering it too.
 
 ## [0.4.0] — 2026-11-10
 

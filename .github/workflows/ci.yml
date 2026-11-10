@@ -52,3 +52,12 @@ jobs:
 
       - name: Check
         run: cargo check --all-targets
+
+  shell:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the installer
+        run: shellcheck --shell=sh --severity=style install.sh

@@ -270,6 +270,35 @@ mainstream. `cargo build --release` produces a single ~1.8 MB binary.
 
 ## Install
 
+macOS, with [Homebrew](https://brew.sh):
+
+```sh
+brew install Vulkan1125/tap/habit
+```
+
+Linux, one line:
+
+```sh
+curl -fsSL https://github.com/Vulkan1125/habit-tracker/releases/latest/download/install.sh | sh
+```
+
+The installer checks the download against the release's `SHA256SUMS`, then installs the native
+package on Debian/Ubuntu (`apt-get`), Fedora/RHEL (`dnf`/`yum`) and Arch (`pacman`). Everywhere
+else — or with `--static` — it unpacks the static musl binary into `~/.local/bin`, which needs no
+root. Useful flags:
+
+```sh
+installer=https://github.com/Vulkan1125/habit-tracker/releases/latest/download/install.sh
+
+curl -fsSL "$installer" | sh                  # detect the distro and install
+curl -fsSL "$installer" | sh -s -- --static   # portable binary in ~/.local/bin
+curl -fsSL "$installer" | sh -s -- --dry-run  # download and verify, install nothing
+```
+
+`--version TAG` pins a release, `--package` forces the distro package, `--static` forces the
+portable binary, `--dry-run` downloads and verifies without installing, and `--yes` skips the
+confirmation. Linux arm64 has no prebuilt binary yet; `cargo install` builds from source.
+
 Prebuilt packages are attached to each [GitHub release](https://github.com/Vulkan1125/habit-tracker/releases/latest):
 
 | Platform | Asset | Install |
@@ -283,6 +312,10 @@ Prebuilt packages are attached to each [GitHub release](https://github.com/Vulka
 Every release also carries a `SHA256SUMS` file. The macOS binary is universal (Apple Silicon and
 Intel) but unsigned; if Gatekeeper quarantines it, remove the attribute with
 `xattr -d com.apple.quarantine habit`.
+
+The Homebrew formula lives in [Vulkan1125/homebrew-tap](https://github.com/Vulkan1125/homebrew-tap)
+and `brew upgrade habit` follows new releases. `install.sh` lives in this repository and is also
+published as a release asset, so both URLs stay in step with the tag you are installing.
 
 From source:
 
