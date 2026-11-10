@@ -204,12 +204,6 @@ impl Theme {
             "░".repeat(width.saturating_sub(filled)),
         )
     }
-
-    /// Sparkline glyph for `0.0..=1.0`.
-    pub fn spark(&self, value: f64) -> &'static str {
-        let index = (value.clamp(0.0, 1.0) * 7.0).round() as usize;
-        BLOCKS[index.min(7)]
-    }
 }
 
 struct RawPalette {
@@ -639,13 +633,5 @@ mod tests {
         assert_eq!(ThemeName::parse("neon"), None);
         assert_eq!(ColorMode::parse("latte"), Some(ColorMode::Light));
         assert_eq!(ColorMode::parse("dusk"), None);
-    }
-
-    #[test]
-    fn sparkline_covers_the_whole_range() {
-        let theme = Theme::new(ThemeName::Terminal, ColorMode::Dark);
-        assert_eq!(theme.spark(0.0), "▁");
-        assert_eq!(theme.spark(1.0), "█");
-        assert_eq!(theme.spark(-5.0), "▁");
     }
 }

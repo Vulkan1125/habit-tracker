@@ -1,7 +1,7 @@
 # habit
 
-**A calm habit tracker for the terminal.** Streaks, weekly quotas, cheat days, tags, notes, a
-trend line and a heatmap — plus a plain JSON file you can read, diff and `grep`. One 1.8 MB Rust
+**A calm habit tracker for the terminal.** Streaks, weekly quotas, cheat days, tags, descriptions,
+dated notes and a heatmap — plus a plain JSON file you can read, diff and `grep`. One 1.8 MB Rust
 binary with no daemon, no account and no network access.
 
 [![CI](https://github.com/Vulkan1125/habit-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/Vulkan1125/habit-tracker/actions/workflows/ci.yml)
@@ -10,16 +10,14 @@ binary with no daemon, no account and no network access.
 
 ```
  habit  Tue 10 Nov 2026                                                            █████░ 3/4 today
-┌ Habits · 4 ────────────────────────────────┐┌ Details ───────────────────────────────────────────┐
-│▸ ● Morning run         daily        ○●◆○●●●││Morning run                                         │
-│  ● Read 20 pages       Mon–Fri      ●●●··●●││daily · since 2026-01-01                            │
-│  ○ Strength            1/3 wk       ●·●··●·││#health #morning                                    │
-│  ● Meditate            daily        ●●●●●●●││                                                    │
-│                                            ││streak     3 days   best 10 days                    │
-│                                            ││this week  ██████████  2/2                          │
+┌────────────────────────────────────────────┐┌ Details ───────────────────────────────────────────┐
+│ Habits 4   Tags 4                          ││Morning run                                         │
+│▸ ● Morning run         daily        ○●◆○●●●││daily · since 2026-01-01                            │
+│  ● Read 20 pages       Mon–Fri      ●●●··●●││#health #morning                                    │
+│  ○ Strength            1/3 wk       ●·●··●·││                                                    │
+│  ● Meditate            daily        ●●●●●●●││streak     3 days   best 10 days                    │
+│  · Evening walk        daily        ○●●●●○◌││this week  ██████████  2/2                          │
 │                                            ││last 30d   █████████░  85% (24 of 28)               │
-│                                            ││                                                    │
-│                                            ││trend      ▇▇▇▇▇▇▇████▇▇▇▇▇▇▇████▇▇▇▇▇▇▇████▇▇▇▆▆▆▆ │
 │                                            ││                                                    │
 │                                            ││Mon ·████░██████████░██████████░██████████░███████  │
 │                                            ││Tue ·███████░██████████░██████████░██████████░████  │
@@ -32,11 +30,16 @@ binary with no daemon, no account and no network access.
 │                                            ││● done  ◆ cheat  ░ missed  ◌ open  · not due        │
 │                                            ││282 check-ins  ◆ 2 cheat this Nov                   │
 │                                            ││                                                    │
-│                                            ││note                                                │
+│                                            ││notes                                               │
+│                                            ││2026-11-10 easy recovery run after yesterday        │
+│                                            ││2026-11-09 legs heavy but went anyway               │
+│                                            ││2026-11-08 felt strong, 5k in 26:30                 │
+│                                            ││                                                    │
+│                                            ││description                                         │
 │                                            ││5k before breakfast                                 │
 │                                            ││                                                    │
 └────────────────────────────────────────────┘└────────────────────────────────────────────────────┘
-space toggle · c cheat · [ ] day · / filter · ? help · q quit
+space toggle · n note · tab tags · / filter · ? help · q quit
 ```
 
 *(Colour is stripped in this capture. The real thing has seven palettes in light and dark mode and
@@ -108,33 +111,73 @@ habit cheat gym --off           # remove it again
 - Checking off a **non-due day** is allowed and counts as extra credit (useful after a reshuffle).
 - Longest streak is kept separately from the current one, so a broken streak doesn't erase history.
 
-### Tags and notes
+### Tags, descriptions and dated notes
 
 Tags are normalised to lowercase kebab-case, de-duplicated and sorted: `#Health & Focus` becomes
-`health-focus`. Notes are free text and appear wrapped in the detail pane.
+`health-focus`. A habit's **description** is free text and appears wrapped in the detail pane.
+**Dated notes** are separate: one note per habit per day, listed newest first with the date on the
+left.
 
 ```sh
-habit add "Morning run" --tag health --tag morning --note "5k before breakfast"
+habit add "Morning run" --tag health --tag morning --description "5k before breakfast"
 habit tag gym health cardio       # add tags
 habit tag gym cardio --remove     # remove one
 habit tags                        # every tag with a habit count
 habit list --tag health           # AND: every listed tag must match
-habit note gym "ten minutes is enough"
-habit note gym                    # print the current note
-habit note gym --clear
+habit describe gym "ten minutes is enough"
+habit describe gym                # print the current description
+habit describe gym --clear
+```
+
+`habit note` remains an alias for `habit describe`, and `habit add --note` still sets the
+description for compatibility.
+
+In the TUI, `tab` switches the left pane between **Habits** and **Tags**. The tag list shows each
+tag with its count of still-active habits; open a tag with `enter`, `space` or a click to see its
+active habits and, under an **Archive** heading, the archived or finished ones. Press `n` on any
+past or present day to write or edit that day's note — right after checking a habit off is the
+natural moment. Dates are shown on the left, notes on the right.
+
+```
+ habit  Tue 10 Nov 2026                                                            █████░ 3/4 today
+┌────────────────────────────────────────────┐┌ Details ───────────────────────────────────────────┐
+│ Habits 4   Tags 4                          ││Morning run                                         │
+│ ‹ all tags   #health · 2 active            ││daily · since 2026-01-01                            │
+│▸ ● Morning run         daily        ○●◆○●●●││#health #morning                                    │
+│  ○ Strength            1/3 wk       ●·●··●·││                                                    │
+│   Archive                                  ││streak     3 days   best 10 days                    │
+│  · Evening walk        daily        ○●●●●○◌││this week  ██████████  2/2                          │
+│                                            ││last 30d   █████████░  85% (24 of 28)               │
+│                                            ││                                                    │
+│                                            ││Mon ·████░██████████░██████████░██████████░███████  │
+│                                            ││Tue ·███████░██████████░██████████░██████████░████  │
+│                                            ││Wed ·██████████░██████████░██████████░██████████░   │
+│                                            ││Thu ███░██████████░██████████░██████████░████████   │
+│                                            ││Fri ██████░██████████░██████████░██████████░████◆   │
+│                                            ││Sat █████████░░█████████░██████████░██████████░█░   │
+│                                            ││Sun █░████████░█░██████████░██████████░██████████   │
+│                                            ││                                                    │
+│                                            ││● done  ◆ cheat  ░ missed  ◌ open  · not due        │
+│                                            ││282 check-ins  ◆ 2 cheat this Nov                   │
+└────────────────────────────────────────────┘└────────────────────────────────────────────────────┘
+space toggle · n note · tab tags · / filter · ? help · q quit
 ```
 
 In the TUI press `/` and type. `#health` matches tags, while plain words match the name, id, tags
-and note. Multiple tokens are ANDed, so `run #morning` narrows to morning runs.
+and description. Multiple tokens are ANDed, so `run #morning` narrows to morning runs.
 
 ### The TUI
 
-- **Habit list** with the selected day's marker, a 7-day dot strip and weekly quota progress.
-- **Date navigation** (`[` `]`, `t` for today): check off, excuse or inspect any past day.
-- **Detail pane** with current and best streak, this week's bar, 30-day completion, a rolling
-  7-day **trend sparkline**, an adaptive heatmap (up to 52 weeks), tags, with monthly cheat count
-  and the wrapped note.
-- **Add/edit dialog** with schedule picker, weekday toggles, start/end dates, tags and note —
+- **Habit list and Tags tabs** in the left pane, switchable with `tab` and clickable with the
+  mouse. Each tag shows its active-habit count; opening one splits active habits from archived and
+  finished ones under an **Archive** heading.
+- **Habit rows** with the selected day's marker, a 7-day dot strip and weekly quota progress.
+- **Date navigation** (`[` `]`, `t` for today): check off, excuse, inspect or annotate any past day.
+- **Detail pane** with current and best streak, this week's bar, 30-day completion, an adaptive
+  heatmap (up to 52 weeks), tags, the wrapped description and dated notes (date left, note right).
+- **Dated notes**: press `n` after checking a habit off to journal the day; empty input removes the
+  note and edits are covered by undo.
+- **Add/edit dialog** with schedule picker, weekday toggles, start/end dates, tags and description —
   all validated inline.
 - **Instant feedback** in the status line, including streak effects and a warning when a second
   cheat in a month will break the run.
@@ -250,7 +293,7 @@ macOS and Linux. Windows terminals are supported by crossterm but untested here.
 ```sh
 habit add "Gym" --weekly 4 --tag health
 habit add "Read 20 pages" --days mon,tue,wed,thu,fri --start 2026-11-01 --end 2026-12-31
-habit add "Meditate" --note "10 minutes is enough"
+habit add "Meditate" --description "10 minutes is enough"
 habit                      # open the TUI, press a / space / c / [ ] / q
 ```
 
@@ -276,27 +319,29 @@ Nothing else to configure. The data file is created on the first change.
 
 | Key | Action |
 | --- | --- |
-| `space` | check off / un-check the selected day |
+| `space` | check off / un-check the selected day (`n` then adds a note) |
+| `tab` | switch the left pane between Habits and Tags |
+| `n` | write or edit the selected day's note |
 | `c` | toggle a cheat day on the selected day |
 | `[` `]` | move the selected day back / forward (never into the future) |
 | `t` | jump back to today |
-| `j` `k`, `↑` `↓` | move selection |
+| `j` `k`, `↑` `↓` | move the habit or tag selection |
 | `g` `G`, `Home` `End` | first / last habit |
 | `a` | add a habit |
 | `e` | edit the selected habit |
 | `d` | archive or restore (history kept) |
 | `x` | delete the habit and its history (asks first) |
 | `u` | undo the last change |
-| `/` | filter — plain text matches name/id/tags/note, `#tag` matches tags, `enter` keeps, `esc` clears |
+| `/` | filter — plain text matches name/id/tags/description, `#tag` matches tags, `enter` keeps, `esc` clears |
 | `r` | reload the data file from disk |
 | `T` | next colour theme (saved to config) |
 | `m` | switch dark / light mode (saved) |
 | `?` | help overlay |
-| `q`, `esc` | quit (first `esc` clears an active filter) |
+| `q`, `esc` | quit — `esc` first clears a filter, then backs out of a tag view |
 
 In the add/edit dialog: `tab` / `shift-tab` moves between fields, `←→` changes the schedule kind,
 `space` toggles a weekday, `enter` saves, `esc` cancels. The fields are name, schedule, weekday
-selection, weekly quota, start date, end date, tags and note.
+selection, weekly quota, start date, end date, tags and description.
 
 <details>
 <summary>Add/edit dialog</summary>
@@ -310,7 +355,7 @@ selection, weekly quota, start date, end date, tags and note.
 │Starts      2026-11-10                                      │
 │Ends        never                                           │
 │Tags        health, morning                                 │
-│Note        optional                                        │
+│Description optional                                        │
 │                                                            │
 │  save                                                      │
 │tab next · arrows change · enter save · esc cancel          │
@@ -327,6 +372,8 @@ selection, weekly quota, start date, end date, tags and note.
 │habit  terminal habit tracker                     │
 │                                                  │
 │space       check off / undo the selected day     │
+│tab         switch habits / tags                  │
+│n           note for the selected day             │
 │c           cheat day (one per month)             │
 │[ ]         previous / next day                   │
 │t           back to today                         │
@@ -342,6 +389,7 @@ selection, weekly quota, start date, end date, tags and note.
 │m           dark / light mode                     │
 │r           reload the file from disk             │
 │?           this help                             │
+│esc         back out / quit                       │
 │q           quit                                  │
 │                                                  │
 │any key closes this                               │
@@ -362,7 +410,7 @@ Global flags, usable before or after the subcommand:
 | Command | Arguments | What it does |
 | --- | --- | --- |
 | `habit` | | open the TUI |
-| `habit add <NAME>` | `--weekly N` / `-w N`, `--days mon,wed`, `--start D`, `--end D`, `--tag TAG` (repeatable), `--note TEXT` | create a habit; defaults to daily, starting today |
+| `habit add <NAME>` | `--weekly N` / `-w N`, `--days mon,wed`, `--start D`, `--end D`, `--tag TAG` (repeatable), `--description TEXT` (`--note` still works) | create a habit; defaults to daily, starting today |
 | `habit done <HABIT>` | `--date YYYY-MM-DD` | check off today or backfill a day |
 | `habit undo <HABIT>` | `--date YYYY-MM-DD` | un-check a day |
 | `habit cheat <HABIT>` | `--date YYYY-MM-DD`, `--off` | mark or remove an excused day |
@@ -371,7 +419,7 @@ Global flags, usable before or after the subcommand:
 | `habit log` | `-n N` (default 14), `--all` | recent check-ins and cheat days, newest first |
 | `habit tag <HABIT> <TAG>…` | `--remove` | add or remove tags |
 | `habit tags` | | every tag with its habit count |
-| `habit note <HABIT> [TEXT]` | `--clear` | set, print or clear a note |
+| `habit describe <HABIT> [TEXT]` | `--clear` | set, print or clear the description (`habit note` is an alias) |
 | `habit start <HABIT> <DATE>` | | move the first day the habit counts |
 | `habit end <HABIT>` | `--date D`, `--clear` | set or clear the inclusive end date |
 | `habit archive <HABIT>` | | toggle archived (history kept) |
@@ -431,12 +479,12 @@ Resolution order for the data file:
 3. `$XDG_DATA_HOME/habit/data.json` (only if absolute)
 4. `$HOME/.local/share/habit/data.json`
 
-Format (version 2) — habits carry their window and metadata; `log` and `cheats` are parallel maps
-from date to habit ids:
+Format (version 3) — habits carry their window and metadata; `log` and `cheats` are parallel maps
+from date to habit ids, and `notes` maps a date to that habit's journal entry:
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "habits": [
     {
       "id": "gym",
@@ -444,7 +492,11 @@ from date to habit ids:
       "schedule": { "kind": "times_per_week", "n": 4 },
       "created": "2026-09-14",
       "tags": ["health"],
-      "note": "ten minutes is enough"
+      "note": "ten minutes is enough",
+      "notes": {
+        "2026-11-09": "legs heavy but went anyway",
+        "2026-11-10": "easy recovery run"
+      }
     },
     {
       "id": "read-20-pages",
@@ -466,13 +518,14 @@ from date to habit ids:
 ```
 
 Ids are slugified from the name (`Morning Walk!` → `morning-walk`) and suffixed on collision
-(`morning-walk-2`). Optional fields (`ends`, `archived`, `note`, `tags`) are omitted when empty.
+(`morning-walk-2`). Optional fields (`ends`, `archived`, `note`, `tags`, `notes`) are omitted when
+empty. The `note` field is the habit's description; dated entries live under `notes`.
 The first cheat for a habit in a calendar month is the excused one; the map itself stores every
 marked day so the UI can show and explain the second.
 
 **Editing by hand is supported**: keep it valid JSON, then press `r` in the TUI or just run another
-command. Empty or whitespace-only files are treated as “no data”. A version-1 file loads with the
-new fields defaulted and is written back as version 2.
+command. Empty or whitespace-only files are treated as “no data”. Older (version 1 or 2) files
+load with the new fields defaulted and are written back as version 3.
 
 ## Configuration
 
@@ -502,14 +555,14 @@ alias g='habit done gym'
 # weekly review: streaks and completion for everything
 habit stats --days 7
 
-# everything in one area, with their notes
+# everything in one area, with their descriptions
 habit list --tag health
 habit stats --habit morning-run
 
 # excuse a planned rest day without breaking the run
 habit cheat gym --date 2026-11-06
 
-# commit your history alongside your notes
+# commit your history alongside your data
 cp "$(habit path)" ~/notes/habits-$(date +%F).json
 ```
 
@@ -522,7 +575,7 @@ a `starship` prompt can all trigger or read it.
 src/
   model.rs    habits, schedules, log, cheats, JSON shape, tags, id slugs
   store.rs    path resolution, atomic load/save, format version and upgrade
-  stats.rs    streaks, completion, trend, heatmap — pure functions
+  stats.rs    streaks, completion, heatmap — pure functions
   app.rs      TUI state, date navigation, key handling, persist-on-change, undo
   cli.rs      subcommands and their text output
   config.rs   config.toml
@@ -552,7 +605,7 @@ A few decisions worth knowing:
 ## Development
 
 ```sh
-cargo test                                  # 119 tests
+cargo test                                  # 129 tests
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 cargo build --release
@@ -575,8 +628,7 @@ days, notes, tags and filtering, a detail-pane trend graph, and the visual/themi
 
 Ideas still on the table, roughly in order:
 
-- Per-day notes (a journal-ish layer) alongside the per-habit note.
-- Switchable trend ranges (30 days / 90 days / a year) and a quota bar chart.
+- A quota bar chart and richer multi-tag views.
 - Tag rename/merge to stop typo sprawl.
 - Opt-in OS-native reminders (`launchd`/`systemd`), never an in-app daemon.
 - Import/export helpers (CSV, old `data.json`) and a monthly HTML report.

@@ -65,7 +65,7 @@ impl Store {
             );
         }
         // Older formats only lack fields that default cleanly; stamp the new
-        // version so the next save does not leave a v1 file holding v2 fields.
+        // version so the next save does not leave an old file holding new fields.
         data.version = DATA_VERSION;
         Ok(data)
     }
@@ -175,7 +175,7 @@ mod tests {
     }
 
     #[test]
-    fn upgrades_a_v1_file_on_load_and_saves_it_as_v2() {
+    fn upgrades_an_old_file_on_load_and_saves_it_as_current() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("data.json");
         fs::write(
@@ -190,7 +190,7 @@ mod tests {
         assert!(data.habits[0].is_active_on(date("2026-01-02")));
         store.save(&data).unwrap();
         let raw = fs::read_to_string(&path).unwrap();
-        assert!(raw.contains("\"version\": 2"), "{raw}");
+        assert!(raw.contains("\"version\": 3"), "{raw}");
     }
 
     #[test]

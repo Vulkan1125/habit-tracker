@@ -56,9 +56,9 @@ pub enum Command {
         /// Tag to attach; repeatable
         #[arg(long = "tag", value_name = "TAG")]
         tags: Vec<String>,
-        /// Note to attach
-        #[arg(long, value_name = "TEXT")]
-        note: Option<String>,
+        /// Description to attach
+        #[arg(long = "description", visible_alias = "note", value_name = "TEXT")]
+        description: Option<String>,
     },
     /// Check a habit off
     Done {
@@ -119,13 +119,14 @@ pub enum Command {
     },
     /// List every tag with its habit count
     Tags,
-    /// Set or clear a habit's note
-    Note {
+    /// Set or clear a habit's description
+    #[command(alias = "note")]
+    Describe {
         habit: String,
-        /// The note text; omit to print the current note
+        /// The description text; omit to print the current description
         #[arg(value_name = "TEXT")]
         text: Vec<String>,
-        /// Remove the note
+        /// Remove the description
         #[arg(long)]
         clear: bool,
     },
@@ -178,12 +179,12 @@ pub fn run(
             start,
             ends,
             tags,
-            note,
+            description,
         } => {
             let schedule = parse_schedule(weekly, days)?;
             let start = start.unwrap_or(today);
             let index =
-                data.add_habit_full(&name, schedule, start, ends, &tags, note.as_deref())?;
+                data.add_habit_full(&name, schedule, start, ends, &tags, description.as_deref())?;
             let habit = &data.habits[index];
             store.save(data)?;
             println!(
@@ -305,24 +306,24 @@ pub fn run(
             }
         }
         Command::Tags => print_tags(data),
-        Command::Note { habit, text, clear } => {
+        Command::Describe { habit, text, clear } => {
             let index = data.resolve_index(&habit)?;
             let habit = &mut data.habits[index];
             let name = habit.name.clone();
             if clear {
                 habit.note = None;
                 store.save(data)?;
-                println!("note cleared on {name}");
+                println!("description cleared on {name}");
             } else if text.is_empty() {
                 match &habit.note {
                     Some(note) => println!("{note}"),
-                    None => println!("{name} has no note"),
+                    None => println!("{name} has no description"),
                 }
             } else {
                 let note = text.join(" ").trim().to_string();
                 habit.note = (!note.is_empty()).then_some(note.clone());
                 store.save(data)?;
-                println!("noted on {name}: {note}");
+                println!("described {name}: {note}");
             }
         }
         Command::Start { habit, date } => {
@@ -726,7 +727,7 @@ mod tests {
             start: None,
             ends: None,
             tags: Vec::new(),
-            note: None,
+            description: None,
         }
     }
 
@@ -838,7 +839,7 @@ mod tests {
     }
 
     #[test]
-    fn add_carries_dates_tags_and_the_note() {
+    fn add_carries_dates_tags_and_the_description() {
         let (_dir, store) = store();
         let mut data = Data::default();
         let today = date("2026-11-10");
@@ -850,7 +851,7 @@ mod tests {
                 start: Some(date("2026-11-01")),
                 ends: Some(date("2026-12-31")),
                 tags: vec!["Health".into(), "morning".into()],
-                note: Some("20 pages".into()),
+                description: Some("20 pages".into()),
             },
             &store,
             &mut data,
@@ -957,13 +958,13 @@ mod tests {
     }
 
     #[test]
-    fn notes_can_be_set_cleared_and_read() {
+    fn descriptions_can_be_set_cleared_and_read() {
         let (_dir, store) = store();
         let mut data = Data::default();
         let today = date("2026-11-10");
         data.add_habit("Gym", Schedule::Daily, today).unwrap();
         run(
-            Command::Note {
+            Command::Describe {
                 habit: "gym".into(),
                 text: vec!["ten".into(), "minutes".into()],
                 clear: false,
@@ -976,7 +977,7 @@ mod tests {
         .unwrap();
         assert_eq!(data.habits[0].note.as_deref(), Some("ten minutes"));
         run(
-            Command::Note {
+            Command::Describe {
                 habit: "gym".into(),
                 text: Vec::new(),
                 clear: true,

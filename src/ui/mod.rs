@@ -48,6 +48,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Mode::Help => help::draw(frame, area, &theme),
         Mode::Form(form) => form.draw(frame, area, &theme),
         Mode::Confirm(confirm) => confirm_overlay(frame, area, &theme, &confirm.prompt),
+        Mode::Note(entry) => note_overlay(frame, area, &theme, entry),
     }
 }
 
@@ -140,25 +141,70 @@ fn hint(app: &App, max_width: usize) -> String {
         Mode::Help => "press any key to close help".to_string(),
         Mode::Form(_) => "tab next · enter save · esc cancel".to_string(),
         Mode::Confirm(_) => "y confirm · n cancel".to_string(),
+        Mode::Note(_) => "enter save · esc cancel · empty clears the note".to_string(),
         Mode::Normal if app.filtering => {
             "type to filter · #tag for tags · enter keep · esc clear".to_string()
         }
         Mode::Normal => {
-            let full = "space toggle · c cheat · [ ] day · t today · a add · e edit · d archive · x delete · u undo · / filter · T theme · m mode · ? help · q quit";
+            let full = "space toggle · n note · c cheat · [ ] day · t today · tab tags · a add · e edit · d archive · x delete · u undo · / filter · T theme · m mode · ? help · q quit";
             if width(full) <= max_width {
                 return full.to_string();
             }
-            let medium = "space toggle · c cheat · [ ] day · / filter · ? help · q quit";
+            let medium = "space toggle · n note · tab tags · / filter · ? help · q quit";
             if width(medium) <= max_width {
                 return medium.to_string();
             }
-            let tiny = "space · c cheat · / filter · ? help · q";
+            let tiny = "space · n · tab · / · ? · q";
             if width(tiny) <= max_width {
                 return tiny.to_string();
             }
-            "space · / · ? · q".to_string()
+            "space · n · / · ? · q".to_string()
         }
     }
+}
+
+fn note_overlay(frame: &mut Frame, area: Rect, theme: &Theme, entry: &crate::app::NoteEntry) {
+    let width = area.width.saturating_sub(4).clamp(34, 68);
+    let height = 6.min(area.height);
+    let popup = Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+    frame.render_widget(Clear, popup);
+    let title = format!(
+        " Note · {} · {} ",
+        truncate(&entry.habit_name, 24),
+        entry.date.format("%a %-d %b")
+    );
+    let block = Block::bordered()
+        .title(title)
+        .border_style(Style::default().fg(theme.accent))
+        .style(theme.base());
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    let mut text: Vec<char> = entry.input.text().chars().collect();
+    let cursor = entry.input.cursor().min(text.len());
+    text.insert(cursor, '▏');
+    let input: String = text.into_iter().collect();
+    let room = inner.width as usize;
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::from(Span::styled(
+                truncate(&input, room),
+                Style::default().fg(theme.fg),
+            )),
+            Line::raw(""),
+            Line::from(Span::styled(
+                truncate("enter save · esc cancel · empty removes", room),
+                Style::default().fg(theme.dim),
+            )),
+        ])
+        .style(theme.base()),
+        inner,
+    );
 }
 
 fn confirm_overlay(frame: &mut Frame, area: Rect, theme: &Theme, prompt: &str) {
@@ -210,6 +256,7 @@ fn confirm_overlay(frame: &mut Frame, area: Rect, theme: &Theme, prompt: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::Tab;
     use crate::config::Config;
     use crate::model::{Data, Schedule};
     use crate::store::Store;
@@ -253,7 +300,57 @@ mod tests {
         assert!(screen.contains("Details"));
         assert!(screen.contains("streak"));
         assert!(screen.contains("today"));
-        assert!(screen.contains("trend"), "{screen}");
+        assert!(screen.contains("Habits"), "{screen}");
+        assert!(screen.contains("Tags"), "{screen}");
+    }
+
+    #[test]
+    fn tags_tab_lists_counts_and_opens_archived_habits() {
+        let mut app = app_with("Gym");
+        app.data.habits[0].tags = vec!["health".into()];
+        let index = app
+            .data
+            .add_habit("Old run", Schedule::Daily, date())
+            .unwrap();
+        app.data.habits[index].tags = vec!["health".into()];
+        app.data.habits[index].archived = true;
+
+        app.select_tab(Tab::Tags);
+        let screen = render(&mut app, 90, 26);
+        assert!(screen.contains("#health"), "{screen}");
+        assert!(screen.contains("Tags 1"), "{screen}");
+        assert!(screen.contains("1"), "{screen}");
+
+        app.tag_cursor = 0;
+        app.open_focused_tag();
+        let screen = render(&mut app, 90, 26);
+        assert!(screen.contains("all tags"), "{screen}");
+        assert!(screen.contains("Archive"), "{screen}");
+        assert!(screen.contains("Old run"), "{screen}");
+    }
+
+    #[test]
+    fn notes_are_listed_with_dates_and_the_trend_is_gone() {
+        let mut app = app_with("Gym");
+        app.data.habits[0].set_note(date(), "felt strong");
+        let screen = render(&mut app, 90, 30);
+        assert!(screen.contains("notes"), "{screen}");
+        assert!(screen.contains("2026-11-10"), "{screen}");
+        assert!(screen.contains("felt strong"), "{screen}");
+        assert!(!screen.contains("trend"), "{screen}");
+    }
+
+    #[test]
+    fn the_note_overlay_renders() {
+        let mut app = app_with("Gym");
+        app.handle_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('n'),
+            crossterm::event::KeyModifiers::NONE,
+        ))
+        .unwrap();
+        let screen = render(&mut app, 90, 30);
+        assert!(screen.contains("Note · Gym"), "{screen}");
+        assert!(screen.contains("enter save"), "{screen}");
     }
 
     #[test]
@@ -288,7 +385,7 @@ mod tests {
         assert!(screen.contains("New habit"), "{screen}");
         assert!(screen.contains("Schedule"), "{screen}");
         assert!(screen.contains("Tags"), "{screen}");
-        assert!(screen.contains("Note"), "{screen}");
+        assert!(screen.contains("Description"), "{screen}");
     }
 
     #[test]

@@ -1,10 +1,14 @@
 //! Application state, key handling and persistence-on-change.
 
+use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use chrono::{NaiveDate, NaiveDateTime};
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
+use ratatui::layout::Rect;
 use ratatui::widgets::ListState;
 
 use crate::config::Config;
@@ -14,11 +18,92 @@ use crate::store::Store;
 use crate::theme::{ColorMode, Theme, ThemeName};
 use crate::ui::form::{Form, FormAction};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tab {
+    Habits,
+    Tags,
+}
+
 pub enum Mode {
     Normal,
     Help,
     Confirm(Confirm),
     Form(Box<Form>),
+    Note(NoteEntry),
+}
+
+/// A single dated note being written for one habit.
+pub struct NoteEntry {
+    pub habit_id: String,
+    pub habit_name: String,
+    pub date: NaiveDate,
+    pub input: crate::ui::form::TextInput,
+}
+
+pub enum NoteAction {
+    Continue,
+    Cancel,
+    Save(String),
+}
+
+impl NoteEntry {
+    pub fn handle_key(&mut self, key: KeyEvent) -> NoteAction {
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+            return NoteAction::Cancel;
+        }
+        match key.code {
+            KeyCode::Esc => NoteAction::Cancel,
+            KeyCode::Enter => NoteAction::Save(self.input.text()),
+            KeyCode::Backspace => {
+                self.input.backspace();
+                NoteAction::Continue
+            }
+            KeyCode::Delete => {
+                self.input.delete();
+                NoteAction::Continue
+            }
+            KeyCode::Left => {
+                self.input.left();
+                NoteAction::Continue
+            }
+            KeyCode::Right => {
+                self.input.right();
+                NoteAction::Continue
+            }
+            KeyCode::Home => {
+                self.input.home();
+                NoteAction::Continue
+            }
+            KeyCode::End => {
+                self.input.end();
+                NoteAction::Continue
+            }
+            KeyCode::Char(character)
+                if !key.modifiers.contains(KeyModifiers::CONTROL)
+                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                self.input.insert(character);
+                NoteAction::Continue
+            }
+            _ => NoteAction::Continue,
+        }
+    }
+}
+
+/// One visual line in the left pane: an `Archive` divider or a habit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListRow {
+    Archive,
+    Habit(usize),
+}
+
+/// Where the last frame put the clickable things, so mouse events can be
+/// resolved without re-running the layout.
+#[derive(Debug, Clone, Default)]
+pub struct HitAreas {
+    pub tabs: Vec<(Tab, Rect)>,
+    pub list: Option<Rect>,
+    pub back: Option<Rect>,
 }
 
 pub struct Confirm {
@@ -44,6 +129,10 @@ pub struct App {
     /// The day the cursor and the check-off keys act on.
     pub view_date: NaiveDate,
     pub week_start: Day,
+    pub tab: Tab,
+    pub tag_focus: Option<String>,
+    pub tag_cursor: usize,
+    pub hits: HitAreas,
     pub config: Config,
     pub theme: Theme,
     pub cursor: usize,
@@ -64,6 +153,10 @@ impl App {
             today,
             view_date: today,
             week_start: config.week_start,
+            tab: Tab::Habits,
+            tag_focus: None,
+            tag_cursor: 0,
+            hits: HitAreas::default(),
             config: config.clone(),
             theme: config.palette(),
             cursor: 0,
@@ -86,14 +179,233 @@ impl App {
         });
     }
 
+    /// Every tag with the number of habits that are still active.
+    ///
+    /// Archived and finished habits are counted as zero on purpose: the tab is
+    /// a map of what you are still working on, not an archive index.
+    pub fn tags(&self) -> Vec<(String, usize)> {
+        let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+        for habit in &self.data.habits {
+            let active = !habit.archived && !habit.is_finished(self.today);
+            for tag in &habit.tags {
+                let count = counts.entry(tag.clone()).or_insert(0);
+                if active {
+                    *count += 1;
+                }
+            }
+        }
+        counts.into_iter().collect()
+    }
+
+    /// Visual rows for the left pane, including an `Archive` divider when a
+    /// tag view has closed habits.
+    pub fn view_rows(&self) -> Vec<ListRow> {
+        let query = self.filter.trim().to_lowercase();
+        let keep =
+            |index: usize| query.is_empty() || matches_query(&self.data.habits[index], &query);
+
+        if self.tab == Tab::Tags {
+            let Some(tag) = &self.tag_focus else {
+                return Vec::new();
+            };
+            let mut active = Vec::new();
+            let mut closed = Vec::new();
+            for index in self.data.display_order(self.today) {
+                let habit = &self.data.habits[index];
+                if !habit.tags.iter().any(|candidate| candidate == tag) || !keep(index) {
+                    continue;
+                }
+                if habit.archived || habit.is_finished(self.today) {
+                    closed.push(index);
+                } else {
+                    active.push(index);
+                }
+            }
+            let mut rows: Vec<ListRow> = active.into_iter().map(ListRow::Habit).collect();
+            if !closed.is_empty() {
+                rows.push(ListRow::Archive);
+                rows.extend(closed.into_iter().map(ListRow::Habit));
+            }
+            return rows;
+        }
+
+        self.data
+            .display_order(self.today)
+            .into_iter()
+            .filter(|index| keep(*index))
+            .map(ListRow::Habit)
+            .collect()
+    }
+
     /// Indices into `data.habits`, active first, archived/finished last, filtered.
     pub fn visible_indices(&self) -> Vec<usize> {
-        let query = self.filter.trim().to_lowercase();
-        let mut order = self.data.display_order(self.today);
-        if !query.is_empty() {
-            order.retain(|index| matches_query(&self.data.habits[*index], &query));
+        self.view_rows()
+            .into_iter()
+            .filter_map(|row| match row {
+                ListRow::Habit(index) => Some(index),
+                ListRow::Archive => None,
+            })
+            .collect()
+    }
+
+    pub fn select_tab(&mut self, tab: Tab) {
+        if tab == self.tab {
+            if tab == Tab::Tags && self.tag_focus.is_some() {
+                self.tag_focus = None;
+                self.cursor = 0;
+            }
+            return;
         }
-        order
+        self.tab = tab;
+        self.tag_focus = None;
+        self.cursor = 0;
+        self.tag_cursor = 0;
+        self.clamp_cursor();
+    }
+
+    fn next_tab(&mut self) {
+        let next = match self.tab {
+            Tab::Habits => Tab::Tags,
+            Tab::Tags => Tab::Habits,
+        };
+        self.select_tab(next);
+    }
+
+    fn move_tag(&mut self, delta: i32) {
+        let length = self.tags().len();
+        if length == 0 {
+            self.tag_cursor = 0;
+            return;
+        }
+        let current = self.tag_cursor.min(length - 1) as i32;
+        self.tag_cursor = (current + delta).clamp(0, length as i32 - 1) as usize;
+    }
+
+    pub fn open_focused_tag(&mut self) {
+        let tags = self.tags();
+        let Some((tag, _)) = tags.get(self.tag_cursor) else {
+            self.flash_err("no tags yet");
+            return;
+        };
+        self.tag_focus = Some(tag.clone());
+        self.cursor = 0;
+        self.clamp_cursor();
+    }
+
+    fn start_note(&mut self) {
+        let Some(habit) = self.selected_habit() else {
+            self.flash_err("select a habit first");
+            return;
+        };
+        if self.view_date > self.today {
+            self.flash_err("cannot write a note for a future day");
+            return;
+        }
+        let mut input = crate::ui::form::TextInput::with_limit(400);
+        if let Some(existing) = habit.note_on(self.view_date) {
+            input.set(existing);
+        }
+        self.mode = Mode::Note(NoteEntry {
+            habit_id: habit.id.clone(),
+            habit_name: habit.name.clone(),
+            date: self.view_date,
+            input,
+        });
+    }
+
+    fn save_note(&mut self, entry: NoteEntry, text: String) {
+        let existing = self
+            .data
+            .habits
+            .iter()
+            .find(|habit| habit.id == entry.habit_id)
+            .and_then(|habit| habit.note_on(entry.date))
+            .unwrap_or("")
+            .to_string();
+        if existing == text.trim() {
+            self.flash_ok("note unchanged");
+            return;
+        }
+        let id = entry.habit_id.clone();
+        let date = entry.date;
+        let text_owned = text.clone();
+        self.mutate(move |data| {
+            if let Some(habit) = data.habits.iter_mut().find(|habit| habit.id == id) {
+                habit.set_note(date, &text_owned);
+            }
+        });
+        let when = format!("{} · {}", date.format("%a %-d %b"), entry.habit_name);
+        if text.trim().is_empty() {
+            self.flash_ok(format!("note removed · {when}"));
+        } else {
+            self.flash_ok(format!("note saved · {when} · n edits it"));
+        }
+    }
+
+    pub fn handle_mouse(&mut self, mouse: MouseEvent) {
+        if !matches!(&self.mode, Mode::Normal) {
+            return;
+        }
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => self.mouse_click(mouse.column, mouse.row),
+            MouseEventKind::ScrollDown => self.scroll_list(1),
+            MouseEventKind::ScrollUp => self.scroll_list(-1),
+            _ => {}
+        }
+    }
+
+    fn mouse_click(&mut self, column: u16, row: u16) {
+        if let Some((tab, _)) = self
+            .hits
+            .tabs
+            .iter()
+            .find(|(_, rect)| rect_contains(*rect, column, row))
+        {
+            let tab = *tab;
+            self.select_tab(tab);
+            return;
+        }
+        if let Some(back) = self.hits.back
+            && rect_contains(back, column, row)
+        {
+            self.tag_focus = None;
+            self.cursor = 0;
+            return;
+        }
+        let Some(list) = self.hits.list else {
+            return;
+        };
+        if !rect_contains(list, column, row) {
+            return;
+        }
+        let offset = (row - list.y) as usize;
+
+        if self.tab == Tab::Tags && self.tag_focus.is_none() {
+            if offset < self.tags().len() {
+                self.tag_cursor = offset;
+                self.open_focused_tag();
+            }
+            return;
+        }
+
+        let Some(ListRow::Habit(index)) = self.view_rows().get(offset).copied() else {
+            return;
+        };
+        if let Some(position) = self
+            .visible_indices()
+            .iter()
+            .position(|candidate| *candidate == index)
+        {
+            self.cursor = position;
+        }
+    }
+
+    fn scroll_list(&mut self, delta: i32) {
+        if self.tab == Tab::Tags && self.tag_focus.is_none() {
+            self.move_tag(delta);
+        } else {
+            self.move_cursor(delta);
+        }
     }
 
     pub fn selected(&self) -> Option<usize> {
@@ -105,10 +417,10 @@ impl App {
     }
 
     pub fn handle_event(&mut self, event: Event) -> Result<()> {
-        if let Event::Key(key) = event
-            && key.kind == KeyEventKind::Press
-        {
-            self.handle_key(key)?;
+        match event {
+            Event::Key(key) if key.kind == KeyEventKind::Press => self.handle_key(key)?,
+            Event::Mouse(mouse) => self.handle_mouse(mouse),
+            _ => {}
         }
         Ok(())
     }
@@ -130,6 +442,14 @@ impl App {
                 }
                 Ok(())
             }
+            Mode::Note(mut entry) => {
+                match entry.handle_key(key) {
+                    NoteAction::Continue => self.mode = Mode::Note(entry),
+                    NoteAction::Cancel => {}
+                    NoteAction::Save(text) => self.save_note(entry, text),
+                }
+                Ok(())
+            }
         }
     }
 
@@ -139,15 +459,61 @@ impl App {
             return Ok(());
         }
 
+        // The tag list has its own cursor and no habit row to act on.
+        if self.tab == Tab::Tags && self.tag_focus.is_none() {
+            match key.code {
+                KeyCode::Char('j') | KeyCode::Down => {
+                    self.move_tag(1);
+                    return Ok(());
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    self.move_tag(-1);
+                    return Ok(());
+                }
+                KeyCode::Char('g') | KeyCode::Home => {
+                    self.tag_cursor = 0;
+                    return Ok(());
+                }
+                KeyCode::Char('G') | KeyCode::End => {
+                    self.tag_cursor = self.tags().len().saturating_sub(1);
+                    return Ok(());
+                }
+                KeyCode::Enter | KeyCode::Char(' ') => {
+                    self.open_focused_tag();
+                    return Ok(());
+                }
+                // Global keys still work, but habit actions must not fire on a
+                // row that is not on screen.
+                KeyCode::Tab
+                | KeyCode::Char('T')
+                | KeyCode::Char('m')
+                | KeyCode::Char('r')
+                | KeyCode::Char('/')
+                | KeyCode::Char('?')
+                | KeyCode::Char('q') => {}
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {}
+                KeyCode::Esc => {
+                    self.tab = Tab::Habits;
+                    return Ok(());
+                }
+                _ => return Ok(()),
+            }
+        }
+
         let control = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
             KeyCode::Char('c') if control => self.quit = true,
             KeyCode::Char('q') => self.quit = true,
             KeyCode::Esc => {
-                if self.filter.is_empty() {
-                    self.quit = true;
-                } else {
+                if !self.filter.is_empty() {
                     self.clear_filter();
+                } else if self.tag_focus.is_some() {
+                    self.tag_focus = None;
+                    self.cursor = 0;
+                } else if self.tab == Tab::Tags {
+                    self.tab = Tab::Habits;
+                } else {
+                    self.quit = true;
                 }
             }
             KeyCode::Char('?') => self.mode = Mode::Help,
@@ -177,6 +543,8 @@ impl App {
                 self.filter.clear();
                 self.cursor = 0;
             }
+            KeyCode::Tab => self.next_tab(),
+            KeyCode::Char('n') => self.start_note(),
             KeyCode::Char('T') => self.cycle_theme(),
             KeyCode::Char('m') => self.toggle_mode(),
             KeyCode::Char('r') => self.reload(),
@@ -304,7 +672,7 @@ impl App {
                 }
             };
             self.flash_ok(format!(
-                "✓ {}{} · {suffix}",
+                "✓ {}{} · {suffix} · n adds a note",
                 self.day_prefix(date),
                 habit.name
             ));
@@ -597,6 +965,13 @@ impl App {
     }
 }
 
+fn rect_contains(rect: Rect, column: u16, row: u16) -> bool {
+    column >= rect.x
+        && column < rect.x.saturating_add(rect.width)
+        && row >= rect.y
+        && row < rect.y.saturating_add(rect.height)
+}
+
 /// `#tag` filters tags; every other token matches name, id, tags or the note.
 fn matches_query(habit: &Habit, query: &str) -> bool {
     query.split_whitespace().all(|token| {
@@ -660,6 +1035,182 @@ mod tests {
         assert_eq!(app.visible_indices(), vec![0]);
         app.filter = "gym #evening".into();
         assert!(app.visible_indices().is_empty());
+    }
+
+    #[test]
+    fn tag_counts_ignore_archived_and_finished_habits() {
+        let mut app = app();
+        app.data.habits[0].tags = vec!["health".into(), "morning".into()];
+        let index = app
+            .data
+            .add_habit("Read", Schedule::Daily, date("2026-11-01"))
+            .unwrap();
+        app.data.habits[index].tags = vec!["health".into(), "mind".into()];
+        app.data.habits[index].archived = true;
+        let index = app
+            .data
+            .add_habit("Run", Schedule::Daily, date("2026-11-01"))
+            .unwrap();
+        app.data.habits[index].tags = vec!["health".into()];
+        app.data.habits[index].ends = Some(date("2026-11-05"));
+
+        assert_eq!(
+            app.tags(),
+            vec![
+                ("health".to_string(), 1),
+                ("mind".to_string(), 0),
+                ("morning".to_string(), 1)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_tag_view_lists_active_habits_then_an_archive_section() {
+        let mut app = app();
+        app.data.habits[0].tags = vec!["health".into()];
+        let index = app
+            .data
+            .add_habit("Read", Schedule::Daily, date("2026-11-01"))
+            .unwrap();
+        app.data.habits[index].tags = vec!["health".into()];
+        app.data.habits[index].archived = true;
+
+        app.select_tab(Tab::Tags);
+        app.tag_cursor = 0;
+        app.open_focused_tag();
+        assert_eq!(app.tag_focus.as_deref(), Some("health"));
+        assert_eq!(
+            app.view_rows(),
+            vec![ListRow::Habit(0), ListRow::Archive, ListRow::Habit(index)]
+        );
+        assert_eq!(app.visible_indices(), vec![0, index]);
+    }
+
+    #[test]
+    fn habit_actions_are_ignored_in_the_tag_list() {
+        let mut app = app();
+        app.select_tab(Tab::Tags);
+        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE))
+            .unwrap();
+        assert!(matches!(app.mode, Mode::Normal));
+        app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+            .unwrap();
+        assert!(!app.data.log.is_done(date("2026-11-10"), "gym"));
+    }
+
+    #[test]
+    fn escape_backs_out_of_the_tag_view_instead_of_quitting() {
+        let mut app = app();
+        app.data.habits[0].tags = vec!["health".into()];
+        app.select_tab(Tab::Tags);
+        app.open_focused_tag();
+        assert!(app.tag_focus.is_some());
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .unwrap();
+        assert!(app.tag_focus.is_none());
+        assert!(!app.quit);
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.tab, Tab::Habits);
+        assert!(!app.quit);
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .unwrap();
+        assert!(app.quit);
+    }
+
+    #[test]
+    fn tab_and_enter_navigate_the_tag_view() {
+        let mut app = app();
+        app.data.habits[0].tags = vec!["health".into()];
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.tab, Tab::Tags);
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.tag_focus.as_deref(), Some("health"));
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.tab, Tab::Habits);
+        assert!(app.tag_focus.is_none());
+    }
+
+    #[test]
+    fn n_opens_a_note_for_the_selected_day_and_enter_saves_it() {
+        let mut app = app();
+        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE))
+            .unwrap();
+        assert!(matches!(app.mode, Mode::Note(_)));
+        for character in "felt strong".chars() {
+            app.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE))
+                .unwrap();
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap();
+        assert!(matches!(app.mode, Mode::Normal));
+        assert_eq!(
+            app.data.habits[0].note_on(date("2026-11-10")),
+            Some("felt strong")
+        );
+        assert!(app.data.habits[0].notes.contains_key(&date("2026-11-10")));
+    }
+
+    #[test]
+    fn n_prefills_the_existing_note_for_editing() {
+        let mut app = app();
+        app.data.habits[0].set_note(date("2026-11-09"), "tired");
+        app.shift_day(-1);
+        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE))
+            .unwrap();
+        let Mode::Note(entry) = &app.mode else {
+            panic!("expected note mode");
+        };
+        assert_eq!(entry.input.text(), "tired");
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(
+            app.data.habits[0].note_on(date("2026-11-09")),
+            Some("tired")
+        );
+    }
+
+    #[test]
+    fn clicking_the_tags_tab_and_a_tag_row_opens_that_tag() {
+        let mut app = app();
+        app.data.habits[0].tags = vec!["health".into()];
+        app.hits.tabs = vec![(Tab::Tags, Rect::new(0, 0, 6, 1))];
+        app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 1,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(app.tab, Tab::Tags);
+
+        app.hits.list = Some(Rect::new(0, 4, 40, 10));
+        app.tag_cursor = 0;
+        app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 2,
+            row: 4,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(app.tag_focus.as_deref(), Some("health"));
+    }
+
+    #[test]
+    fn clicking_a_habit_row_selects_it() {
+        let mut app = app();
+        app.data
+            .add_habit("Read", Schedule::Daily, date("2026-11-01"))
+            .unwrap();
+        app.hits.list = Some(Rect::new(0, 5, 40, 10));
+        app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 3,
+            row: 6,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(app.cursor, 1);
     }
 
     #[test]

@@ -50,6 +50,10 @@ impl TextInput {
         self.value.iter().collect()
     }
 
+    pub fn cursor(&self) -> usize {
+        self.cursor
+    }
+
     pub fn insert(&mut self, character: char) {
         if self.value.len() >= self.limit {
             return;
@@ -71,19 +75,19 @@ impl TextInput {
         }
     }
 
-    fn left(&mut self) {
+    pub fn left(&mut self) {
         self.cursor = self.cursor.saturating_sub(1);
     }
 
-    fn right(&mut self) {
+    pub fn right(&mut self) {
         self.cursor = (self.cursor + 1).min(self.value.len());
     }
 
-    fn home(&mut self) {
+    pub fn home(&mut self) {
         self.cursor = 0;
     }
 
-    fn end(&mut self) {
+    pub fn end(&mut self) {
         self.cursor = self.value.len();
     }
 }
@@ -488,7 +492,7 @@ impl Form {
         );
         frame.render_widget(
             Paragraph::new(field_row(
-                "Note",
+                "Description",
                 self.input_line(&self.note, Field::Note, theme, field_width, "optional"),
                 theme,
             )),

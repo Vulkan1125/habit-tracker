@@ -15,9 +15,9 @@ Six requested features, plus the items carried over from 0.1.0.
 | --- | --- | --- | --- |
 | 1 | Start and end dates | M | shipped |
 | 2 | Cheat days (one per month) | L | shipped |
-| 3 | Notes | S | shipped (per-habit; per-day still open) |
+| 3 | Notes | S | shipped (per-habit in 0.2.0; per-day in 0.3.0) |
 | 4 | Tags and tag filtering | M | shipped |
-| 5 | Graph in the detail pane | M | shipped (sparkline; chart ranges open) |
+| 5 | Graph in the detail pane | M | shipped in 0.2.0; sparkline removed in 0.3.0 |
 | 6 | A genuinely beautiful UI | L | shipped (seven palettes, square borders) |
 
 The sequence was **3 → 4 → 1 → 2 → 5 → 6**. Notes and tags were isolated and made the list easier
@@ -114,8 +114,12 @@ month-bucketing rule. Every existing streak test has a cheat-day sibling. The co
 ## 3. Notes
 
 **Phase 1 shipped in 0.2.0:** the per-habit note is editable in the dialog and via `habit note`,
-wrapped in the detail pane, and included in search. Phase 2 (per-day notes) is still open and moved
-to [Carried over](#carried-over-from-01x).
+wrapped in the detail pane, and included in search. It is now called the habit's **description**
+(`habit describe`, `--description`), so it is not confused with dated notes.
+
+**Phase 2 shipped in 0.3.0:** dated notes, one per habit per day, written with `n` in the TUI and
+listed newest first in the detail pane. The original `note` field stayed put, so the upgrade is
+additive.
 
 The `note` field and its rendering already existed in 0.1.0; there was no way to write one from
 the app.
@@ -126,11 +130,11 @@ the app.
 - CLI: `habit note <habit> "text"`, `habit note <habit> --clear`, and `habit note <habit>` to print.
 - Included in search matching.
 
-**Phase 2 — per-day note (optional)**
+**Phase 2 — per-day note**
 
-A `"notes": { "2026-11-10": "bad sleep, still showed up" }` map, shown in the detail pane for the
-selected day and in `habit log`. Useful for a journal-ish workflow without turning the app into a
-journal app.
+Shipped as a `"notes": { "2026-11-10": "bad sleep, still showed up" }` map, shown in the detail
+pane with the date on the left. The cursor day picks the note, so it doubles as a lightweight
+journal without turning the app into a journal app.
 
 **Open questions**
 
@@ -211,7 +215,7 @@ install it.
 - Truecolor when the terminal reports it, 256-colour fallback, `mono` for the rest — detected once
   at startup, no config required.
 - Per-habit accent derived from a hash of the id, so a habit keeps its colour across sessions
-  without storing one; used for the detail heading and trend line.
+  without storing one; used for the detail heading.
 - Dedicated semantics: green done, amber open, red missed, cyan cheat, dim not-due. Every colour
   also has a glyph or weight difference so nothing depends on colour alone.
 
@@ -239,8 +243,7 @@ beyond palette tables.
 
 ## Carried over from 0.1.x
 
-- Per-day notes, shown for the selected day and in `habit log`.
-- Switchable trend ranges and a quota bar chart.
+- A quota bar chart and richer multi-tag views.
 - Tag rename/merge.
 - Optional reminders/notifications — fights the "no daemon" design, so it would be opt-in and
   OS-native (`launchd`/`systemd`), not an in-app loop.
@@ -263,6 +266,6 @@ file, drop the fields it does not know about on the next save, and lose data qui
 that old build refuses the file with a clear error instead, and the original is still on disk as
 `data.json.bak`.
 
-Implemented in 0.2.0: a version-1 file loads with defaults for the new fields and is stamped
-version 2 on the next save, while a future version is refused. Every feature lands with tests in
+Implemented in 0.2.0 and extended in 0.3.0: an older file loads with defaults for the new fields and
+is stamped as the current version on the next save, while a future version is refused. Every feature lands with tests in
 `stats.rs` (or wherever the logic belongs) and, where it renders, a `TestBackend` frame test.

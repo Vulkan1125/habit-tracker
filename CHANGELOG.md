@@ -8,6 +8,40 @@ All notable changes to `habit` are recorded here. The format follows
 
 Nothing yet.
 
+## [0.3.0] — 2026-11-10
+
+The tag-and-journal release: a second left-pane tab for tags, dated notes on every day, and a
+clearer name for the per-habit free text.
+
+### Added
+
+- **Tags tab**: `tab` switches the left pane between Habits and Tags, and both tabs are clickable
+  with the mouse. The tag list shows every tag with its count of active habits before you open it.
+  Opening a tag lists its active habits, then archived and finished ones under an **Archive**
+  heading. Clicking the active Tags tab or the `‹ all tags` row goes back.
+- **Dated notes**: press `n` on any past or present day to write a note for that day. Notes render
+  in the detail pane newest first, date on the left and text on the right; empty input removes the
+  note. Marking a habit done flashes `n adds a note`, and saving a note also feeds undo.
+- **Mouse support** in the TUI: click tabs, tags, the back row and habit rows, and scroll the list.
+
+### Changed
+
+- The per-habit free text is now called the **description**, so it is not confused with the new
+  dated notes. The dialog label and detail-pane heading say “Description”, the CLI uses
+  `habit add --description` and `habit describe` — `--note` and `habit note` remain as aliases.
+- **Data format v3**: habits gain a `notes` map of date to entry. Older files load with the field
+  defaulted and are written back as v3; the existing `note` field is unchanged on disk.
+- The detail pane and list are laid out around the tab bar; borders stay square.
+
+### Removed
+
+- The trend line in the detail pane, along with `stats::trend`, `theme::spark` and their tests.
+
+### Tests
+
+- Test count is now **129**, covering tag counts, the archive split, mouse hit-testing, note
+  round-trips, `esc` backing out of a tag view and the rename.
+
 ## [0.2.1] — 2026-11-10
 
 ### Added
@@ -106,7 +140,8 @@ First release.
   failure modes, form validation and TUI rendering via `TestBackend`.
 - CI on Linux and macOS (format, clippy, tests, MSRV 1.88) and a release profile with LTO + strip.
 
-[Unreleased]: https://github.com/Vulkan1125/habit-tracker/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/Vulkan1125/habit-tracker/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.3.0
 [0.2.1]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.2.1
 [0.2.0]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Vulkan1125/habit-tracker/releases/tag/v0.1.0

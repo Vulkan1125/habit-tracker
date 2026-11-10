@@ -16,6 +16,8 @@ const KEYS: &[(&str, &str)] = &[
     ("t", "back to today"),
     ("j k ↑ ↓", "move"),
     ("g G", "first / last"),
+    ("tab", "switch habits / tags"),
+    ("n", "note for the selected day"),
     ("a", "add a habit"),
     ("e", "edit the selected habit"),
     ("d", "archive or restore"),
@@ -26,6 +28,7 @@ const KEYS: &[(&str, &str)] = &[
     ("m", "dark / light mode"),
     ("r", "reload the file from disk"),
     ("?", "this help"),
+    ("esc", "back out / quit"),
     ("q", "quit"),
 ];
 

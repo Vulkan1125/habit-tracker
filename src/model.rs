@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 /// Bumped whenever the on-disk shape changes, so an older build refuses the file
 /// instead of silently dropping fields it does not know about.
-pub const DATA_VERSION: u32 = 2;
+pub const DATA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Day {
@@ -162,6 +162,9 @@ pub struct Habit {
     pub note: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    /// Dated journal entries, one per day, newest first when iterated in reverse.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub notes: BTreeMap<NaiveDate, String>,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -179,6 +182,7 @@ impl Habit {
             archived: false,
             note: None,
             tags: Vec::new(),
+            notes: BTreeMap::new(),
         }
     }
 
@@ -190,6 +194,32 @@ impl Habit {
     /// The window has closed, so the habit can no longer be checked off.
     pub fn is_finished(&self, today: NaiveDate) -> bool {
         self.ends.is_some_and(|ends| today > ends)
+    }
+
+    /// The note written for `date`, if any.
+    pub fn note_on(&self, date: NaiveDate) -> Option<&str> {
+        self.notes.get(&date).map(String::as_str)
+    }
+
+    /// Set or clear the note for `date`. Returns whether anything changed.
+    pub fn set_note(&mut self, date: NaiveDate, text: &str) -> bool {
+        let text = text.trim();
+        if text.is_empty() {
+            self.notes.remove(&date).is_some()
+        } else if self.notes.get(&date).map(String::as_str) == Some(text) {
+            false
+        } else {
+            self.notes.insert(date, text.to_string());
+            true
+        }
+    }
+
+    /// Dated notes, newest first.
+    pub fn notes_desc(&self) -> impl Iterator<Item = (NaiveDate, &str)> {
+        self.notes
+            .iter()
+            .rev()
+            .map(|(date, text)| (*date, text.as_str()))
     }
 
     /// `since 2026-09-14`, or `2026-09-14 → 2026-12-31` with an end date.
@@ -896,5 +926,44 @@ mod tests {
         .unwrap();
         assert_eq!(data.habits[0].tags, vec!["health"]);
         assert_eq!(data.habits[0].note.as_deref(), Some("ten minutes"));
+    }
+
+    #[test]
+    fn dated_notes_are_set_replaced_and_removed() {
+        let mut habit = Habit::new(
+            "gym".into(),
+            "Gym".into(),
+            Schedule::Daily,
+            date("2026-11-01"),
+        );
+        assert!(habit.set_note(date("2026-11-09"), "  felt strong  "));
+        assert_eq!(habit.note_on(date("2026-11-09")), Some("felt strong"));
+        assert!(!habit.set_note(date("2026-11-09"), "felt strong"));
+        assert!(habit.set_note(date("2026-11-09"), "even better"));
+        assert!(habit.set_note(date("2026-11-10"), "easy day"));
+        assert_eq!(
+            habit.notes_desc().collect::<Vec<_>>(),
+            vec![
+                (date("2026-11-10"), "easy day"),
+                (date("2026-11-09"), "even better")
+            ]
+        );
+        assert!(habit.set_note(date("2026-11-09"), "   "));
+        assert_eq!(habit.note_on(date("2026-11-09")), None);
+        assert!(habit.notes.contains_key(&date("2026-11-10")));
+    }
+
+    #[test]
+    fn notes_round_trip_through_json() {
+        let mut habit = Habit::new(
+            "gym".into(),
+            "Gym".into(),
+            Schedule::Daily,
+            date("2026-11-01"),
+        );
+        habit.set_note(date("2026-11-09"), "felt strong");
+        let json = serde_json::to_string(&habit).unwrap();
+        let back: Habit = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.note_on(date("2026-11-09")), Some("felt strong"));
     }
 }

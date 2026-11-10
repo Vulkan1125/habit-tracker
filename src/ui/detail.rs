@@ -1,4 +1,4 @@
-//! The right-hand pane: streaks, trend, heatmap, tags and the note.
+//! The right-hand pane: streaks, heatmap, dated notes and the habit description.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -127,8 +127,6 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     ]));
 
     lines.push(Line::raw(""));
-    lines.push(trend_line(app, habit, inner_width, accent, &theme));
-    lines.push(Line::raw(""));
     lines.extend(heatmap_lines(app, habit, inner_width, &theme));
     lines.push(Line::raw(""));
     lines.push(legend(inner_width, &theme));
@@ -153,10 +151,60 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     }
     lines.push(Line::from(summary));
 
+    let notes: Vec<(chrono::NaiveDate, &str)> = habit.notes_desc().collect();
+    if !notes.is_empty() {
+        lines.push(Line::raw(""));
+        lines.push(Line::from(Span::styled(
+            "notes",
+            Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
+        )));
+        let max_lines = area.height.saturating_sub(2) as usize;
+        let date_column = 11usize;
+        let note_width = inner_width.saturating_sub(date_column).max(8);
+        let mut shown = 0;
+        for (date, text) in &notes {
+            if lines.len() >= max_lines {
+                break;
+            }
+            let chunks = wrap(text, note_width, 2);
+            let room = max_lines.saturating_sub(lines.len());
+            let take = chunks.len().min(room);
+            for (index, chunk) in chunks.iter().take(take).enumerate() {
+                if index == 0 {
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            format!("{:<10} ", date.format("%Y-%m-%d")),
+                            Style::default().fg(theme.dim),
+                        ),
+                        Span::styled(chunk.clone(), Style::default().fg(theme.fg)),
+                    ]));
+                } else {
+                    lines.push(Line::from(vec![
+                        Span::raw(" ".repeat(date_column)),
+                        Span::styled(chunk.clone(), Style::default().fg(theme.fg)),
+                    ]));
+                }
+            }
+            if take > 0 {
+                shown += 1;
+            }
+            if take < chunks.len() {
+                break;
+            }
+        }
+        let remaining = notes.len().saturating_sub(shown);
+        if remaining > 0 && lines.len() < max_lines {
+            lines.push(Line::from(Span::styled(
+                format!("… {remaining} older"),
+                Style::default().fg(theme.dim),
+            )));
+        }
+    }
+
     if let Some(note) = &habit.note {
         lines.push(Line::raw(""));
         lines.push(Line::from(Span::styled(
-            "note",
+            "description",
             Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
         )));
         for chunk in wrap(note, inner_width, 3) {
@@ -187,46 +235,6 @@ fn legend(inner_width: usize, theme: &Theme) -> Line<'static> {
         spans.push(Span::styled("  ·", Style::default().fg(theme.dim)));
         spans.push(Span::styled(" not due", Style::default().fg(theme.dim)));
     }
-    Line::from(spans)
-}
-
-fn trend_line(
-    app: &App,
-    habit: &Habit,
-    inner_width: usize,
-    accent: ratatui::style::Color,
-    theme: &Theme,
-) -> Line<'static> {
-    let width = inner_width.saturating_sub(8).clamp(5, 40);
-    let series = stats::trend(
-        habit,
-        &app.data.history(),
-        app.today,
-        app.week_start,
-        width as u32,
-    );
-    let mut spans = vec![Span::styled(
-        pad_right("trend", 11),
-        Style::default().fg(theme.dim),
-    )];
-    spans.push(Span::styled(
-        series
-            .iter()
-            .map(|value| theme.spark(*value))
-            .collect::<String>(),
-        Style::default().fg(accent),
-    ));
-    let latest = series.last().copied().unwrap_or(0.0);
-    spans.push(Span::styled(
-        format!("  {:.0}%", latest * 100.0),
-        Style::default().fg(if latest >= 0.8 {
-            theme.done
-        } else if latest >= 0.5 {
-            theme.warn
-        } else {
-            theme.missed
-        }),
-    ));
     Line::from(spans)
 }
 

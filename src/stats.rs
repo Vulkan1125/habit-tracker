@@ -1,4 +1,4 @@
-//! Streaks, completion rates, trend series and heatmap data.
+//! Streaks, completion rates and heatmap data.
 //!
 //! Everything here is a pure function of `(habit, history, today)`, so the tests
 //! can pin a date instead of depending on the wall clock.
@@ -409,34 +409,6 @@ pub fn heatmap(
         })
         .collect()
 }
-
-/// Rolling 7-day completion ending on each of the last `days` days.
-///
-/// Values are `0.0..=1.0`, ready to be drawn as a sparkline. Days with nothing
-/// scheduled report `0.0`.
-pub fn trend(
-    habit: &Habit,
-    history: &History,
-    today: NaiveDate,
-    week_start: Day,
-    days: u32,
-) -> Vec<f64> {
-    let days = days.clamp(2, 180);
-    (0..days)
-        .rev()
-        .map(|back| {
-            let date = today - Duration::days(i64::from(back));
-            let window = completion(habit, history, date, week_start, 7);
-            if window.possible == 0 {
-                0.0
-            } else {
-                // Extra check-ins can beat a quota; the trend caps at 100%.
-                (f64::from(window.done) / f64::from(window.possible)).min(1.0)
-            }
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -844,46 +816,5 @@ mod tests {
             (1, 1),
             "the cheat is neither done nor required"
         );
-    }
-
-    #[test]
-    fn trend_caps_a_beaten_quota_at_one() {
-        let f = Fixture::new(Schedule::TimesPerWeek { n: 1 }, "2026-11-01").done(&[
-            "2026-11-04",
-            "2026-11-05",
-            "2026-11-06",
-            "2026-11-07",
-            "2026-11-08",
-            "2026-11-09",
-            "2026-11-10",
-        ]);
-        let series = trend(&f.habit, &f.history(), date("2026-11-10"), Day::Mon, 3);
-        assert!(series.iter().all(|value| *value <= 1.0), "{series:?}");
-        assert_eq!(series[2], 1.0);
-    }
-
-    #[test]
-    fn trend_series_is_a_rolling_completion_rate() {
-        let f = Fixture::new(Schedule::Daily, "2026-11-01").done(&[
-            "2026-11-04",
-            "2026-11-05",
-            "2026-11-06",
-            "2026-11-07",
-            "2026-11-08",
-            "2026-11-09",
-            "2026-11-10",
-        ]);
-        let series = trend(&f.habit, &f.history(), date("2026-11-10"), Day::Mon, 4);
-        assert_eq!(series.len(), 4);
-        assert!((series[0] - 4.0 / 7.0).abs() < 1e-9);
-        assert!((series[3] - 1.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn trend_is_quiet_before_a_habit_exists() {
-        let f = Fixture::new(Schedule::Daily, "2026-11-10");
-        let series = trend(&f.habit, &f.history(), date("2026-11-10"), Day::Mon, 5);
-        assert_eq!(series.len(), 5);
-        assert!(series[..4].iter().all(|value| *value == 0.0));
     }
 }
