@@ -333,7 +333,9 @@ else
             ;;
         arch)
             confirm "Install habit $version with pacman?" || exit 1
-            run_root pacman -U --noconfirm --quiet "$tmp/$asset"
+            # pacman's --quiet only applies to query and sync operations; -U
+            # rejects it, so ask for less output the way upgrade accepts.
+            run_root pacman -U --noconfirm --noprogressbar "$tmp/$asset"
             install_dir="/usr/bin"
             ;;
         *)

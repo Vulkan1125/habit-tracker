@@ -6,7 +6,10 @@ All notable changes to `habit` are recorded here. The format follows
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **The Arch package install no longer fails with `invalid option '--quiet'`.** `pacman -U` rejects
+  that flag, so the installer now uses `--noprogressbar` for quieter output instead.
 
 ## [0.11.0] (2026-11-11
 
