@@ -2,8 +2,8 @@
 
 **A feature-rich habit tracker that stays calm in the terminal.** Streaks, weekly quotas, cheat
 days, tags, descriptions, dated notes, per-habit reminders, monthly HTML reports and a heatmap —
-plus a plain JSON file you can read, diff, `grep` and script against. Minimal to begin. Depth on
-demand. The core is one small binary, reminders and reports are optional modules, and there is no
+plus a plain JSON file you can read, diff, `grep` and script against. **Minimal to begin. Depth on
+demand.** The core is one small binary, reminders and reports are optional modules, and there is no
 daemon, no account and no network access.
 
 [![CI](https://github.com/Vulkan1125/habit-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/Vulkan1125/habit-tracker/actions/workflows/ci.yml)
