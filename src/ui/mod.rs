@@ -147,18 +147,22 @@ fn hint(app: &App, max_width: usize) -> String {
         Mode::Confirm(_) => "y confirm · n cancel".to_string(),
         Mode::Note(_) => "tab date/note · ↑↓ day · enter save · esc cancel".to_string(),
         Mode::Tag(_) => "enter rename · esc cancel · an existing name merges".to_string(),
-        Mode::Normal if app.tab == Tab::Tags && app.tag_focus.is_none() => {
-            "j k move · enter open · e rename · tab habits · ? help · q quit".to_string()
-        }
         Mode::Normal if app.filtering => {
             "type to filter · #tag for tags · enter keep · esc clear".to_string()
         }
+        Mode::Normal if app.tab == Tab::Tags && app.tag_focus.is_none() => {
+            "j k move · enter open · e rename · tab next · ? help · q quit".to_string()
+        }
+        Mode::Normal if app.tab == Tab::Archive => {
+            "d restore · space · n note · e edit · x delete · u undo · tab next · ? help"
+                .to_string()
+        }
         Mode::Normal => {
-            let full = "space toggle · n note · c cheat · [ ] day · t today · tab tags · a add · e edit · d archive · x delete · u undo · / filter · b bar · T theme · m mode · ? help · q quit";
+            let full = "space toggle · n note · c cheat · [ ] day · t today · tab pane · a add · e edit · d archive · x delete · u undo · / filter · b bar · T theme · m mode · ? help · q quit";
             if width(full) <= max_width {
                 return full.to_string();
             }
-            let medium = "space toggle · n note · tab tags · b bar · / filter · ? help · q quit";
+            let medium = "space toggle · n note · tab · b bar · / filter · ? help · q quit";
             if width(medium) <= max_width {
                 return medium.to_string();
             }
@@ -591,6 +595,35 @@ mod tests {
     }
 
     #[test]
+    fn future_habits_render_under_a_starting_later_heading() {
+        let mut app = app_with("Gym");
+        app.data
+            .add_habit("Read", Schedule::Daily, date() + chrono::Duration::days(5))
+            .unwrap();
+        assert!(!app.data.habits[1].is_active_on(date()));
+        assert_eq!(app.data.due_today(date()), 1, "only Gym is due");
+        let screen = render(&mut app, 90, 30);
+        assert!(screen.contains("Starting later"), "{screen}");
+        assert!(screen.contains("Habits 1"), "{screen}");
+    }
+
+    #[test]
+    fn the_archive_tab_shows_archived_and_ended_habits() {
+        let mut app = app_with("Gym");
+        app.data.habits[0].archived = true;
+        app.data
+            .add_habit("Read", Schedule::Daily, date() - chrono::Duration::days(10))
+            .unwrap();
+        app.data.habits[1].ends = Some(date() - chrono::Duration::days(1));
+        app.select_tab(Tab::Archive);
+        let screen = render(&mut app, 90, 30);
+        assert!(screen.contains("Archive 2"), "{screen}");
+        assert!(screen.contains("Archived"), "{screen}");
+        assert!(screen.contains("Ended"), "{screen}");
+        assert!(screen.contains("ended"), "{screen}");
+    }
+
+    #[test]
     fn an_end_date_shows_the_remaining_days_in_the_list() {
         let mut app = app_with("Gym");
         app.data.habits[0].ends = Some(date() + chrono::Duration::days(12));
@@ -602,8 +635,10 @@ mod tests {
         assert!(screen.contains("last day"), "{screen}");
 
         app.data.habits[0].ends = Some(date() - chrono::Duration::days(2));
+        app.select_tab(Tab::Archive);
         let screen = render(&mut app, 90, 24);
         assert!(screen.contains("ended"), "{screen}");
+        assert!(screen.contains("Ended"), "{screen}");
     }
 
     #[test]

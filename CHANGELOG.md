@@ -8,6 +8,29 @@ All notable changes to `habit` are recorded here. The format follows
 
 Nothing yet.
 
+## [0.6.0] — 2026-11-11
+
+### Added
+
+- **An Archive tab.** `tab` now cycles Habits → Tags → Archive, and the Archive tab collects closed
+  habits under **Archived** and **Ended**. `d` restores an archived habit or files an ended one
+  away, so the Habits tab stays about what is running. The tab is clickable, like the others, and
+  `esc` backs out to Habits.
+- **Habits that start later have their own heading.** A habit created with a future start date no
+  longer inflates today's list: it sits under **Starting later** in the Habits tab, is skipped by
+  the day's due count and by tab completion, and still appears under its tags.
+- **Native reminders, without a daemon.** `habit remind` sends one desktop notification with the
+  habits still open today (quota habits only while their week is short; done, excused and finished
+  days are skipped). `habit schedule install --at HH:MM` hands a daily run to launchd on macOS or a
+  systemd user timer on Linux, with `remove` and `status` alongside; `--dry-run` prints the unit
+  file or notification text instead. The scheduler is opt-in and nothing runs in the background
+  otherwise.
+
+### Changed
+
+- The Habits tab's tab-bar count now matches its list: archived, finished and future-start habits
+  are left out.
+
 ## [0.5.0] — 2026-11-10
 
 ### Added

@@ -7,6 +7,7 @@ mod cli;
 mod config;
 mod format;
 mod model;
+mod reminders;
 mod stats;
 mod store;
 mod theme;

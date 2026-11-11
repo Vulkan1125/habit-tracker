@@ -75,15 +75,24 @@ fn draw_tabs(frame: &mut Frame, area: Rect, app: &mut App) {
         .data
         .habits
         .iter()
-        .filter(|habit| !habit.archived && !habit.is_finished(app.today))
+        .filter(|habit| {
+            !habit.archived && !habit.is_finished(app.today) && habit.created <= app.today
+        })
         .count();
     let tags_count = app.tags().len();
+    let archive_count = app
+        .data
+        .habits
+        .iter()
+        .filter(|habit| habit.archived || habit.is_finished(app.today))
+        .count();
 
     let mut spans = Vec::new();
     let mut x = area.x;
     for (tab, label) in [
         (Tab::Habits, format!(" Habits {habits_count} ")),
         (Tab::Tags, format!(" Tags {tags_count} ")),
+        (Tab::Archive, format!(" Archive {archive_count} ")),
     ] {
         let label_width = width(&label) as u16;
         if x.saturating_add(label_width) > area.x.saturating_add(area.width) {
@@ -135,6 +144,10 @@ fn habit_list(frame: &mut Frame, area: Rect, app: &mut App) {
     if rows.is_empty() {
         let message = if app.data.habits.is_empty() {
             "No habits yet — press a to add the first one"
+        } else if app.tab == Tab::Archive {
+            "Nothing archived yet — press d on a habit"
+        } else if app.tab == Tab::Habits {
+            "Nothing running — see the Archive tab"
         } else if app.tag_focus.is_some() {
             "Nothing in this tag matches the filter"
         } else if app.filter.is_empty() {
@@ -149,6 +162,10 @@ fn habit_list(frame: &mut Frame, area: Rect, app: &mut App) {
     } else {
         for row in &rows {
             match row {
+                ListRow::Heading(label) => items.push(ListItem::new(Line::from(Span::styled(
+                    format!(" {label}"),
+                    Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
+                )))),
                 ListRow::Archive => items.push(ListItem::new(Line::from(Span::styled(
                     " Archive",
                     Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),

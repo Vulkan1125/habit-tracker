@@ -22,6 +22,7 @@ use crate::ui::form::{Form, FormAction};
 pub enum Tab {
     Habits,
     Tags,
+    Archive,
 }
 
 pub enum Mode {
@@ -201,9 +202,12 @@ fn edit_input(input: &mut crate::ui::form::TextInput, key: KeyEvent) {
     }
 }
 
-/// One visual line in the left pane: an `Archive` divider or a habit.
+/// One visual line in the left pane: a section heading, the tag view's archive
+/// divider, or a habit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ListRow {
+    /// A section label that cannot be selected.
+    Heading(&'static str),
     Archive,
     Habit(usize),
 }
@@ -316,44 +320,86 @@ impl App {
         counts.into_iter().collect()
     }
 
-    /// Visual rows for the left pane, including an `Archive` divider when a
-    /// tag view has closed habits.
+    /// Visual rows for the left pane. Tags and the archive have their own
+    /// grouping; the habits tab pushes habits that have not started yet under a
+    /// separate heading so today's list stays about today.
     pub fn view_rows(&self) -> Vec<ListRow> {
         let query = self.filter.trim().to_lowercase();
         let keep =
             |index: usize| query.is_empty() || matches_query(&self.data.habits[index], &query);
 
-        if self.tab == Tab::Tags {
-            let Some(tag) = &self.tag_focus else {
-                return Vec::new();
-            };
-            let mut active = Vec::new();
-            let mut closed = Vec::new();
-            for index in self.data.display_order(self.today) {
-                let habit = &self.data.habits[index];
-                if !habit.tags.iter().any(|candidate| candidate == tag) || !keep(index) {
-                    continue;
+        match self.tab {
+            Tab::Tags => {
+                let Some(tag) = &self.tag_focus else {
+                    return Vec::new();
+                };
+                let mut active = Vec::new();
+                let mut closed = Vec::new();
+                for index in self.data.display_order(self.today) {
+                    let habit = &self.data.habits[index];
+                    if !habit.tags.iter().any(|candidate| candidate == tag) || !keep(index) {
+                        continue;
+                    }
+                    if habit.archived || habit.is_finished(self.today) {
+                        closed.push(index);
+                    } else {
+                        active.push(index);
+                    }
                 }
-                if habit.archived || habit.is_finished(self.today) {
-                    closed.push(index);
-                } else {
-                    active.push(index);
+                let mut rows: Vec<ListRow> = active.into_iter().map(ListRow::Habit).collect();
+                if !closed.is_empty() {
+                    rows.push(ListRow::Archive);
+                    rows.extend(closed.into_iter().map(ListRow::Habit));
                 }
+                rows
             }
-            let mut rows: Vec<ListRow> = active.into_iter().map(ListRow::Habit).collect();
-            if !closed.is_empty() {
-                rows.push(ListRow::Archive);
-                rows.extend(closed.into_iter().map(ListRow::Habit));
+            Tab::Archive => {
+                let mut archived = Vec::new();
+                let mut ended = Vec::new();
+                for index in self.data.display_order(self.today) {
+                    let habit = &self.data.habits[index];
+                    if !keep(index) {
+                        continue;
+                    }
+                    if habit.archived {
+                        archived.push(index);
+                    } else if habit.is_finished(self.today) {
+                        ended.push(index);
+                    }
+                }
+                let mut rows = Vec::new();
+                if !archived.is_empty() {
+                    rows.push(ListRow::Heading("Archived"));
+                    rows.extend(archived.into_iter().map(ListRow::Habit));
+                }
+                if !ended.is_empty() {
+                    rows.push(ListRow::Heading("Ended"));
+                    rows.extend(ended.into_iter().map(ListRow::Habit));
+                }
+                rows
             }
-            return rows;
+            Tab::Habits => {
+                let mut running = Vec::new();
+                let mut later = Vec::new();
+                for index in self.data.display_order(self.today) {
+                    let habit = &self.data.habits[index];
+                    if habit.archived || habit.is_finished(self.today) || !keep(index) {
+                        continue;
+                    }
+                    if habit.created > self.today {
+                        later.push(index);
+                    } else {
+                        running.push(index);
+                    }
+                }
+                let mut rows: Vec<ListRow> = running.into_iter().map(ListRow::Habit).collect();
+                if !later.is_empty() {
+                    rows.push(ListRow::Heading("Starting later"));
+                    rows.extend(later.into_iter().map(ListRow::Habit));
+                }
+                rows
+            }
         }
-
-        self.data
-            .display_order(self.today)
-            .into_iter()
-            .filter(|index| keep(*index))
-            .map(ListRow::Habit)
-            .collect()
     }
 
     /// Indices into `data.habits`, active first, archived/finished last, filtered.
@@ -362,7 +408,7 @@ impl App {
             .into_iter()
             .filter_map(|row| match row {
                 ListRow::Habit(index) => Some(index),
-                ListRow::Archive => None,
+                ListRow::Heading(_) | ListRow::Archive => None,
             })
             .collect()
     }
@@ -385,7 +431,8 @@ impl App {
     fn next_tab(&mut self) {
         let next = match self.tab {
             Tab::Habits => Tab::Tags,
-            Tab::Tags => Tab::Habits,
+            Tab::Tags => Tab::Archive,
+            Tab::Archive => Tab::Habits,
         };
         self.select_tab(next);
     }
@@ -705,7 +752,7 @@ impl App {
                 | KeyCode::Char('q') => {}
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {}
                 KeyCode::Esc => {
-                    self.tab = Tab::Habits;
+                    self.select_tab(Tab::Habits);
                     return Ok(());
                 }
                 _ => return Ok(()),
@@ -722,8 +769,10 @@ impl App {
                 } else if self.tag_focus.is_some() {
                     self.tag_focus = None;
                     self.cursor = 0;
-                } else if self.tab == Tab::Tags {
+                } else if self.tab != Tab::Habits {
                     self.tab = Tab::Habits;
+                    self.cursor = 0;
+                    self.clamp_cursor();
                 } else {
                     self.quit = true;
                 }
@@ -1336,6 +1385,127 @@ mod tests {
     }
 
     #[test]
+    fn the_habits_tab_puts_habits_that_start_later_under_a_heading() {
+        let mut app = app();
+        app.data
+            .add_habit("Read", Schedule::Daily, date("2026-11-20"))
+            .unwrap();
+        app.data
+            .add_habit("Old", Schedule::Daily, date("2026-10-01"))
+            .unwrap();
+        app.data.habits[2].archived = true;
+
+        assert_eq!(
+            app.view_rows(),
+            vec![
+                ListRow::Habit(0),
+                ListRow::Heading("Starting later"),
+                ListRow::Habit(1),
+            ]
+        );
+        // The heading is a label, not a selection.
+        assert_eq!(app.visible_indices(), vec![0, 1]);
+        app.cursor = 1;
+        assert_eq!(app.selected(), Some(1));
+    }
+
+    #[test]
+    fn the_archive_tab_splits_archived_habits_from_ended_ones() {
+        let mut app = app();
+        app.data
+            .add_habit("Read", Schedule::Daily, date("2026-11-01"))
+            .unwrap();
+        app.data.habits[0].archived = true;
+        app.data.habits[1].ends = Some(date("2026-11-05"));
+
+        app.select_tab(Tab::Archive);
+        assert_eq!(
+            app.view_rows(),
+            vec![
+                ListRow::Heading("Archived"),
+                ListRow::Habit(0),
+                ListRow::Heading("Ended"),
+                ListRow::Habit(1),
+            ]
+        );
+        assert_eq!(app.visible_indices(), vec![0, 1]);
+    }
+
+    #[test]
+    fn archiving_from_the_habits_tab_moves_the_habit_to_the_archive() {
+        let mut app = app();
+        press(&mut app, KeyCode::Char('d'));
+        assert!(app.data.habits[0].archived);
+        assert!(app.view_rows().is_empty());
+        assert_eq!(
+            app.flash.as_ref().map(|flash| flash.text.as_str()),
+            Some("archived Gym · d restores")
+        );
+
+        app.select_tab(Tab::Archive);
+        assert_eq!(
+            app.view_rows(),
+            vec![ListRow::Heading("Archived"), ListRow::Habit(0)]
+        );
+
+        // Restoring from the archive sends it back to the habits tab.
+        press(&mut app, KeyCode::Char('d'));
+        assert!(!app.data.habits[0].archived);
+        assert!(app.view_rows().is_empty());
+        app.select_tab(Tab::Habits);
+        assert_eq!(app.view_rows(), vec![ListRow::Habit(0)]);
+    }
+
+    #[test]
+    fn esc_leaves_the_archive_for_the_habits_tab() {
+        let mut app = app();
+        app.select_tab(Tab::Archive);
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.tab, Tab::Habits);
+        assert!(!app.quit);
+        press(&mut app, KeyCode::Esc);
+        assert!(app.quit);
+    }
+
+    #[test]
+    fn clicking_a_heading_does_not_move_the_selection() {
+        let mut app = app();
+        app.data
+            .add_habit("Read", Schedule::Daily, date("2026-11-20"))
+            .unwrap();
+        app.hits.list = Some(Rect::new(0, 5, 40, 10));
+        app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 2,
+            row: 6, // the "Starting later" row
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(app.cursor, 0);
+
+        app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 2,
+            row: 7,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(app.cursor, 1);
+    }
+
+    #[test]
+    fn a_habit_that_starts_later_can_be_filtered_for() {
+        let mut app = app();
+        app.data
+            .add_habit("Read", Schedule::Daily, date("2026-11-20"))
+            .unwrap();
+        app.filter = "read".into();
+        assert_eq!(
+            app.view_rows(),
+            vec![ListRow::Heading("Starting later"), ListRow::Habit(1)]
+        );
+        assert_eq!(app.visible_indices(), vec![1]);
+    }
+
+    #[test]
     fn tab_and_enter_navigate_the_tag_view() {
         let mut app = app();
         app.data.habits[0].tags = vec!["health".into()];
@@ -1345,6 +1515,10 @@ mod tests {
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
             .unwrap();
         assert_eq!(app.tag_focus.as_deref(), Some("health"));
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.tab, Tab::Archive);
+        assert!(app.tag_focus.is_none());
         app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
             .unwrap();
         assert_eq!(app.tab, Tab::Habits);

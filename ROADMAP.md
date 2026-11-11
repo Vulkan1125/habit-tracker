@@ -5,7 +5,9 @@ that release. The sections are kept as a record of the decisions, with a **Shipp
 implementation differs from the sketch. Open work moved to [Carried over](#carried-over-from-01x).
 
 Every feature keeps the two rules that make the project what it is: **one plain JSON file** and
-**no daemon, account or network**.
+**no daemon, account or network**. The Archive tab, the **Starting later** heading and native
+reminders shipped in 0.6.0; the reminders hand a daily run to launchd/systemd rather than living
+inside the app.
 
 ## How the pieces fit together
 
@@ -251,8 +253,9 @@ beyond palette tables.
 ## Carried over from 0.1.x
 
 - A quota bar chart and richer multi-tag views.
-- Optional reminders/notifications — fights the "no daemon" design, so it would be opt-in and
-  OS-native (`launchd`/`systemd`), not an in-app loop.
+- Optional reminders/notifications — **shipped in 0.6.0** as `habit remind` plus `habit schedule
+  install`, which writes a launchd agent or systemd user timer. Still no daemon and still opt-in,
+  exactly as sketched here.
 - Import/export helpers (CSV, and reading a previous `data.json`) and a monthly HTML report.
 - Windows CI.
 

@@ -3,12 +3,13 @@
 use std::collections::BTreeSet;
 
 use anyhow::{Context, Result, bail};
-use chrono::{Duration, NaiveDate};
+use chrono::{Duration, NaiveDate, NaiveTime};
 use clap::{Parser, Subcommand};
 
 use crate::config::Config;
 use crate::format::{pad_left, pad_right, truncate, width};
 use crate::model::{Data, Day, Habit, Schedule, normalize_tag};
+use crate::reminders;
 use crate::stats;
 use crate::store::Store;
 use crate::theme::ThemeName;
@@ -176,10 +177,45 @@ pub enum Command {
     },
     /// Print the data file path
     Path,
+    /// Notify about habits that are still open today
+    Remind {
+        /// Print the reminder instead of sending a desktop notification
+        #[arg(long)]
+        dry_run: bool,
+        /// Notify even when nothing is due
+        #[arg(long)]
+        always: bool,
+    },
+    /// Install a daily reminder with launchd (macOS) or systemd (Linux)
+    Schedule {
+        #[command(subcommand)]
+        action: ScheduleAction,
+    },
     /// Print the effective configuration
     Config,
     /// List the available themes
     Themes,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ScheduleAction {
+    /// Install or replace the daily reminder
+    Install {
+        /// Time of day, 24-hour HH:MM
+        #[arg(long, default_value = "09:00", value_name = "HH:MM")]
+        at: String,
+        /// Print the unit files instead of installing them
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Stop and delete the scheduled reminder
+    Remove {
+        /// Print what would be removed without touching anything
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Show whether a reminder is installed
+    Status,
 }
 
 pub fn run(
@@ -416,6 +452,8 @@ pub fn run(
             println!("deleted {name} and {check_ins} check-ins");
         }
         Command::Path => println!("{}", store.path().display()),
+        Command::Remind { dry_run, always } => remind(data, today, config, dry_run, always)?,
+        Command::Schedule { action } => schedule(store, action)?,
         Command::Config => {
             let path = Config::path();
             let state = match &path {
@@ -447,6 +485,112 @@ pub fn run(
         }
     }
     Ok(())
+}
+
+fn remind(
+    data: &Data,
+    today: NaiveDate,
+    config: &Config,
+    dry_run: bool,
+    always: bool,
+) -> Result<()> {
+    let open = reminders::pending(data, today, config.week_start);
+    if open.is_empty() {
+        if always {
+            let title = "habit · all clear";
+            let body = "All habits are done for today";
+            if reminders::notify(title, body, dry_run)? || dry_run {
+                println!("{title}\n{body}");
+            }
+        } else {
+            println!("nothing left today · all clear");
+        }
+        return Ok(());
+    }
+
+    let (title, body) = reminders::message(&open);
+    if reminders::notify(&title, &body, dry_run)? {
+        println!("{title} · {body}");
+    } else {
+        println!("{title}\n{body}");
+    }
+    Ok(())
+}
+
+fn schedule(store: &Store, action: ScheduleAction) -> Result<()> {
+    let platform = reminders::platform();
+    let program = std::env::current_exe().context("finding the habit binary")?;
+    // launchd and systemd start with a minimal PATH, so the unit carries the
+    // binary and the data file as absolute paths.
+    let data = std::path::absolute(store.path()).unwrap_or_else(|_| store.path().to_path_buf());
+
+    match action {
+        ScheduleAction::Install { at, dry_run } => {
+            let at = parse_time(&at)?;
+            let units = reminders::units(platform, &program, &data, at)?;
+            if dry_run {
+                for (path, body) in &units.files {
+                    println!("# {}", path.display());
+                    print!("{body}");
+                    if !body.ends_with('\n') {
+                        println!();
+                    }
+                }
+                return Ok(());
+            }
+            let units = reminders::install(platform, &program, &data, at)?;
+            println!(
+                "reminder installed for {} · {}",
+                at.format("%H:%M"),
+                units.files[0].0.display()
+            );
+            println!("  `habit schedule remove` stops it");
+        }
+        ScheduleAction::Remove { dry_run } => {
+            if dry_run {
+                for path in reminders::unit_paths(platform)? {
+                    println!("would remove {}", path.display());
+                }
+                return Ok(());
+            }
+            let removed = reminders::remove(platform)?;
+            if removed.is_empty() {
+                println!("no scheduled reminder found");
+            } else {
+                for path in removed {
+                    println!("removed {}", path.display());
+                }
+            }
+        }
+        ScheduleAction::Status => {
+            let rows = reminders::status(platform)?;
+            if rows.is_empty() {
+                println!(
+                    "scheduling is not supported on this platform; run `habit remind` from cron"
+                );
+                return Ok(());
+            }
+            for (path, written, live) in &rows {
+                let state = if *live {
+                    "loaded"
+                } else if *written {
+                    "written, not loaded"
+                } else {
+                    "not installed"
+                };
+                println!("{} {}", pad_right(state, 20), path.display());
+            }
+            if rows.iter().all(|(_, _, live)| !live) {
+                println!("`habit schedule install` sets up a daily reminder");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn parse_time(raw: &str) -> Result<NaiveTime> {
+    NaiveTime::parse_from_str(raw.trim(), "%H:%M")
+        .with_context(|| format!("unknown time \"{raw}\" (use 24-hour HH:MM, like 09:00)"))
 }
 
 fn ensure_active(habit: &Habit, date: NaiveDate) -> Result<()> {
@@ -779,6 +923,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::resolve(Some(dir.path().join("data.json"))).unwrap();
         (dir, store)
+    }
+
+    #[test]
+    fn schedule_time_accepts_24_hour_and_rejects_garbage() {
+        assert_eq!(
+            parse_time("09:05").unwrap(),
+            NaiveTime::from_hms_opt(9, 5, 0).unwrap()
+        );
+        assert!(parse_time("9pm").is_err());
     }
 
     #[test]

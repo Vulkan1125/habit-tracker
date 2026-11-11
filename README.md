@@ -11,7 +11,7 @@ binary with no daemon, no account and no network access.
 ```
  habit  Tue 10 Nov 2026                                                            █████░ 3/4 today
 ┌────────────────────────────────────────────┐┌ Details ───────────────────────────────────────────┐
-│ Habits 4   Tags 4                          ││Morning run                                         │
+│ Habits 4   Tags 4   Archive 1              ││Morning run                                         │
 │▸ ● Morning run         daily        ○●◆○●●●││description:                                        │
 │  ● Read 20 pages       51d left     ●●●··●●││    5k before breakfast                             │
 │  ○ Strength            1/3 wk       ●·●··●·││    daily · since 2026-01-01                        │
@@ -38,7 +38,7 @@ binary with no daemon, no account and no network access.
 │                                            ││2026-11-08 felt strong, 5k in 26:30                 │
 │                                            ││                                                    │
 └────────────────────────────────────────────┘└────────────────────────────────────────────────────┘
-space toggle · n note · tab tags · b bar · / filter · ? help · q quit
+space toggle · n note · tab pane · b bar · / filter · ? help · q quit
 ```
 
 *(Colour is stripped in this capture. The real thing has seven palettes in light and dark mode and
@@ -135,12 +135,14 @@ habit describe gym --clear
 `habit note` remains an alias for `habit describe`, and `habit add --note` still sets the
 description for compatibility.
 
-In the TUI, `tab` switches the left pane between **Habits** and **Tags**. The tag list shows each
-tag with its count of still-active habits; open a tag with `enter`, `space` or a click to see its
-active habits and, under an **Archive** heading, the archived or finished ones. Press `e` on the
-tag list to rename the tag under the cursor: the name is rewritten on every habit that carries it,
-and typing a name that is already in use asks whether to merge the two, so a typo cannot silently
-create a near-duplicate tag.
+In the TUI, `tab` cycles the left pane through **Habits**, **Tags** and **Archive**. The Habits
+tab shows what is running today, with habits whose start date is still ahead under a **Starting
+later** heading. The tag list shows each tag with its count of still-active habits; open a tag with
+`enter`, `space` or a click to see its active habits and, under an **Archive** heading, the archived
+or finished ones. The Archive tab collects closed habits under **Archived** and **Ended**; press
+`d` there to restore or archive. Press `e` on the tag list to rename the tag under the cursor: the
+name is rewritten on every habit that carries it, and typing a name that is already in use asks
+whether to merge the two, so a typo cannot silently create a near-duplicate tag.
 
 Press `n` to write or edit a note — right after checking a habit off is the natural moment. The
 dialog opens on the day you are looking at (today unless you moved with `[` / `]`), and `tab` moves
@@ -152,7 +154,7 @@ the left, notes on the right, newest first.
 ```
  habit  Tue 10 Nov 2026                                                            █████░ 3/4 today
 ┌────────────────────────────────────────────┐┌ Details ───────────────────────────────────────────┐
-│ Habits 4   Tags 4                          ││Morning run                                         │
+│ Habits 4   Tags 4   Archive 1              ││Morning run                                         │
 │ ‹ all tags   #health · 2 active            ││description:                                        │
 │▸ ● Morning run         daily        ○●◆○●●●││    5k before breakfast                             │
 │  ○ Strength            1/3 wk       ●·●··●·││    daily · since 2026-01-01                        │
@@ -171,7 +173,7 @@ the left, notes on the right, newest first.
 │                                            ││Sun █░████████░█░██████████░██████████░██████████   │
 │                                            ││                                                    │
 └────────────────────────────────────────────┘└────────────────────────────────────────────────────┘
-space toggle · n note · tab tags · b bar · / filter · ? help · q quit
+space toggle · n note · tab pane · b bar · / filter · ? help · q quit
 ```
 
 In the TUI press `/` and type. `#health` matches tags, while plain words match the name, id, tags
@@ -179,10 +181,12 @@ and description. Multiple tokens are ANDed, so `run #morning` narrows to morning
 
 ### The TUI
 
-- **Habit list and Tags tabs** in the left pane, switchable with `tab` and clickable with the
-  mouse. Each tag shows its active-habit count; opening one splits active habits from archived and
-  finished ones under an **Archive** heading. On the tag list `e` renames the tag under the cursor,
-  or merges it into another tag after asking.
+- **Habits, Tags and Archive tabs** in the left pane, cycled with `tab` and clickable with the
+  mouse. Habits that start in the future sit under a **Starting later** heading, so today's list
+  stays about today. Each tag shows its active-habit count; opening one splits active habits from
+  archived and finished ones under an **Archive** heading. On the tag list `e` renames the tag
+  under the cursor, or merges it into another tag after asking. The Archive tab groups closed
+  habits under **Archived** and **Ended**.
 - **Habit rows** with the selected day's marker, a 7-day dot strip and weekly quota progress.
   Habits with an end date replace the schedule label with a countdown (`51d left`, `last day`,
   `ended`), turning amber in the final three days.
@@ -200,7 +204,8 @@ and description. Multiple tokens are ANDed, so `run #morning` narrows to morning
   cheat in a month will break the run.
 - **One-step undo** for every mutation — check-off, cheat, add, edit, rename/merge a tag, archive
   and delete.
-- **Archive** instead of delete: history is kept and the habit renders dimmed at the bottom.
+- **Archive instead of delete**: history is kept, the habit leaves the Habits tab and `d` moves it
+  between the Archive tab's **Archived** and **Ended** groups.
 - **Tag-aware filter** (`/`), **help overlay** (`?`), **reload from disk** (`r`).
 - **Theme switching without editing a file**: `T` steps through the seven palettes and `m` flips
   dark/light; both are written back to `config.toml` immediately.
@@ -274,6 +279,28 @@ Gym · 4×/week · since 2026-09-14
 - **Tolerant loading**: a missing or empty file means “no habits yet”, not an error.
 - **Hand-editable**: plain, pretty-printed JSON, and `r` reloads it without restarting.
 - **Failed saves revert the change in memory**, so the screen never lies about what's on disk.
+
+### Native reminders, without a daemon
+
+`habit remind` is a single process: it reads the file, works out what is still open — quota habits
+only nudge while their week is short, and excused or finished days are skipped — then asks the
+desktop for a notification. On macOS that is `osascript`, on Linux `notify-send`; elsewhere it
+prints the text. Nothing stays running, and no network is involved.
+
+To run it daily, hand it to the OS scheduler:
+
+```
+$ habit schedule install --at 09:00
+reminder installed for 09:00 · ~/Library/LaunchAgents/com.habit.reminder.plist
+$ habit schedule status
+loaded               ~/Library/LaunchAgents/com.habit.reminder.plist
+$ habit schedule remove
+```
+
+macOS gets a launchd agent; Linux gets a `habit-reminder.service` plus `.timer` pair in
+`~/.config/systemd/user`. Both units carry the absolute binary and data path, so a minimal
+scheduler `PATH` does not matter. `--dry-run` prints the unit or the reminder text without
+touching the system, and scheduling is entirely opt-in: the data file and config are unchanged.
 
 ### Small on purpose
 
@@ -389,7 +416,7 @@ Nothing else to configure. The data file is created on the first change.
 | Key | Action |
 | --- | --- |
 | `space` | check off / un-check the selected day (`n` then adds a note) |
-| `tab` | switch the left pane between Habits and Tags |
+| `tab` | cycle the left pane through Habits, Tags and Archive |
 | `n` | write or edit a note; the dialog's date field can move it to any past day |
 | `b` | show or hide the bottom bar |
 | `c` | toggle a cheat day on the selected day |
@@ -407,7 +434,7 @@ Nothing else to configure. The data file is created on the first change.
 | `T` | next colour theme (saved to config) |
 | `m` | switch dark / light mode (saved) |
 | `?` | help overlay |
-| `q`, `esc` | quit — `esc` first clears a filter, then backs out of a tag view |
+| `q`, `esc` | quit — `esc` first clears a filter, then backs out of a tag view or another tab |
 
 In the add/edit dialog: `tab` / `shift-tab` moves between fields, `←→` changes the schedule kind,
 `space` toggles a weekday, `enter` saves, `esc` cancels. The fields are name, schedule, weekday
@@ -442,7 +469,7 @@ selection, weekly quota, start date, end date, tags and description.
 │habit  terminal habit tracker                     │
 │                                                  │
 │space       check off / undo the selected day     │
-│tab         switch habits / tags                  │
+│tab         switch habits / tags / archive        │
 │n           note for a chosen day                 │
 │b           show / hide the bottom bar            │
 │c           cheat day (one per month)             │
@@ -497,6 +524,10 @@ Global flags, usable before or after the subcommand:
 | `habit end <HABIT>` | `--date D`, `--clear` | set or clear the inclusive end date |
 | `habit archive <HABIT>` | | toggle archived (history kept) |
 | `habit remove <HABIT>` | `--force` | delete habit and history; refuses without `--force` |
+| `habit remind` | `--dry-run`, `--always` | notify about habits still open today |
+| `habit schedule install` | `--at HH:MM` (default 09:00), `--dry-run` | install a daily reminder with launchd or systemd |
+| `habit schedule remove` | `--dry-run` | stop and delete the scheduled reminder |
+| `habit schedule status` | | show whether the reminder is installed and loaded |
 | `habit path` | | print the data file path |
 | `habit config` | | print effective config, data path, theme and mode |
 | `habit themes` | | list the palettes |
@@ -697,13 +728,12 @@ several widths and in the overlays.
 
 `0.2.0` shipped the six features planned for it — start/end dates, monthly cheat days, notes, tags
 and filtering, a detail-pane trend graph and the visual/theming pass. Later releases added dated
-notes, the Tags tab and tag rename/merge; the trend line itself went away in `0.3.0`, leaving the
-adaptive heatmap. **[ROADMAP.md](ROADMAP.md)** keeps the original design notes and decisions.
+notes, the Tags tab, tag rename/merge, the Archive tab and opt-in native reminders; the trend line
+itself went away in `0.3.0`, leaving the adaptive heatmap. **[ROADMAP.md](ROADMAP.md)** keeps the original design notes and decisions.
 
 Ideas still on the table, roughly in order:
 
 - A quota bar chart and richer multi-tag views.
-- Opt-in OS-native reminders (`launchd`/`systemd`), never an in-app daemon.
 - Import/export helpers (CSV, old `data.json`) and a monthly HTML report.
 - Windows CI.
 
