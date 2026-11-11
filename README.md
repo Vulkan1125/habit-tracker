@@ -761,7 +761,7 @@ A few decisions worth knowing:
 ## Development
 
 ```sh
-cargo test                                  # 224 tests
+cargo test                                  # 225 tests
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 cargo build --release

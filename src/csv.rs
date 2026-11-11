@@ -198,7 +198,11 @@ pub fn import(data: &mut Data, text: &str) -> Result<ImportReport> {
                 }
             }
             RowStatus::Note => {
-                if data.habits[index].set_note(date, &row.note) {
+                // Never replace a note the local file already has; an import
+                // only fills in what is missing.
+                if data.habits[index].note_on(date).is_none()
+                    && data.habits[index].set_note(date, &row.note)
+                {
                     report.notes += 1;
                 }
             }
@@ -570,6 +574,20 @@ mod tests {
         assert_eq!(report.checkins, 1, "only the new check-in is added");
         assert!(data.log.is_done(date("2026-11-05"), &id));
         assert_eq!(data.habits[0].name, "Renamed locally");
+    }
+
+    #[test]
+    fn import_does_not_replace_a_local_daily_note() {
+        let original = sample();
+        let text = export(&original);
+        let mut data = original.clone();
+        let day = date("2026-11-04");
+        data.habits[0].set_note(day, "local wording");
+
+        let report = import(&mut data, &text).unwrap();
+        assert_eq!(report.notes, 0);
+        assert_eq!(data.habits[0].note_on(day), Some("local wording"));
+        assert_eq!(report.checkins, 0, "the check-ins were already present");
     }
 
     #[test]

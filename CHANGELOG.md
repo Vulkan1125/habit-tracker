@@ -8,6 +8,15 @@ All notable changes to `habit` are recorded here. The format follows
 
 Nothing yet.
 
+## [0.9.1] — 2026-11-11
+
+### Fixed
+
+- Typing a lone `#` in the TUI filter now behaves like a half-typed tag filter and keeps every
+  habit visible, instead of emptying the list until a letter follows.
+- A CSV import no longer replaces a dated note that already exists locally; imports only fill in
+  missing history, matching the additive promise for check-ins and cheat days.
+
 ## [0.9.0] — 2026-11-11
 
 ### Added

@@ -1400,8 +1400,8 @@ fn match_token(habit: &Habit, token: &str) -> bool {
             .map(|part| part.trim().trim_start_matches('#'))
             .filter(|part| !part.is_empty())
             .collect();
-        return !alternatives.is_empty()
-            && alternatives
+        return alternatives.is_empty()
+            || alternatives
                 .iter()
                 .any(|tag| habit.tags.iter().any(|candidate| candidate.contains(tag)));
     }
@@ -1480,6 +1480,10 @@ mod tests {
         assert_eq!(app.visible_indices(), vec![0, 1], "parts match as prefixes");
         app.filter = "#no|#nope".into();
         assert!(app.visible_indices().is_empty());
+
+        // A lone `#` is a half-typed filter, not an empty result.
+        app.filter = "#".into();
+        assert_eq!(app.visible_indices(), vec![0, 1]);
 
         // A new token is still ANDed on top of the alternatives.
         app.filter = "#health|#mind gym".into();
