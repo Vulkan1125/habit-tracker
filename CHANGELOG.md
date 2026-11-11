@@ -6,6 +6,10 @@ All notable changes to `habit` are recorded here. The format follows
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.11.0] — 2026-11-11
+
 ### Added
 
 - **Reports you can repaint from inside the file.** Every monthly HTML report now carries all seven
