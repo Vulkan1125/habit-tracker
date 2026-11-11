@@ -13,6 +13,7 @@ use chrono::{Datelike, Duration, Months, NaiveDate};
 use crate::format::plural;
 use crate::model::{Data, Day, Habit, Schedule, start_of_week};
 use crate::stats::{self, Status};
+use crate::theme::{ColorMode, ThemeName, WebPalette, web_palette};
 
 /// The directory that holds reports beside the data file.
 pub fn default_path(data_path: &Path) -> PathBuf {
@@ -409,8 +410,74 @@ fn status_class(status: Status) -> &'static str {
     }
 }
 
+/// One palette as CSS custom properties.
+fn palette_vars(palette: &WebPalette) -> String {
+    format!(
+        "--bg: {bg}; --card: {card}; --ink: {ink}; --muted: {muted};\n  \
+         --line: {line}; --blank: {blank}; --accent: {accent}; --done: {done};\n  \
+         --cheat: {cheat}; --missed: {missed}; --pending: {pending};",
+        bg = palette.bg.hex(),
+        card = palette.card.hex(),
+        ink = palette.ink.hex(),
+        muted = palette.muted.hex(),
+        line = palette.line.hex(),
+        blank = palette.blank.hex(),
+        accent = palette.accent.hex(),
+        done = palette.done.hex(),
+        cheat = palette.cheat.hex(),
+        missed = palette.missed.hex(),
+        pending = palette.pending.hex(),
+    )
+}
+
+/// Every palette, so a report can be repainted from inside the file: change
+/// `data-palette` on `<html>`, or edit the hex values, and nothing else.
+fn palette_css(active: ThemeName) -> String {
+    let light = |name: ThemeName| palette_vars(&web_palette(name, ColorMode::Light));
+    let dark = |name: ThemeName| palette_vars(&web_palette(name, ColorMode::Dark));
+
+    let mut css = String::from(
+        "/* Palettes. The page opens with the palette saved in habit: change\n   \
+         data-palette on <html> to repaint it, or edit the hex values below. */\n",
+    );
+    css.push_str(&format!(
+        ":root {{\n  color-scheme: light dark;\n  --shadow: rgba(20, 18, 12, .06);\n  {}\n}}\n",
+        light(active)
+    ));
+    for name in ThemeName::ALL {
+        css.push_str(&format!(
+            "[data-palette=\"{}\"] {{\n  {}\n}}\n",
+            name.label(),
+            light(name)
+        ));
+    }
+    css.push_str(
+        "@media (prefers-color-scheme: dark) {\n  :root {\n    --shadow: rgba(0, 0, 0, .35);\n    ",
+    );
+    css.push_str(&dark(active).replace('\n', "\n  "));
+    css.push_str("\n  }\n");
+    for name in ThemeName::ALL {
+        css.push_str(&format!(
+            "  [data-palette=\"{}\"] {{\n    {}\n  }}\n",
+            name.label(),
+            dark(name).replace('\n', "\n  ")
+        ));
+    }
+    css.push_str("}\n");
+    css
+}
+
 /// Render the complete report for the month containing `month`.
-pub fn render(data: &Data, today: NaiveDate, month: NaiveDate, week_start: Day) -> String {
+///
+/// `theme` picks the palette; the light or dark variant follows the viewer's
+/// preference, the way a document should.
+pub fn render(
+    data: &Data,
+    today: NaiveDate,
+    month: NaiveDate,
+    week_start: Day,
+    theme: ThemeName,
+) -> String {
     let month = month.with_day(1).unwrap_or(month);
     let month_name = month.format("%B %Y").to_string();
     let rows = rows(data, today, month, week_start);
@@ -419,6 +486,7 @@ pub fn render(data: &Data, today: NaiveDate, month: NaiveDate, week_start: Day) 
     let cheats: u32 = rows.iter().map(|row| row.cheats).sum();
     let series = performance(data, today, month);
     let chart = chart_svg(&series);
+    let palette_css = palette_css(theme);
     let chart_html = if chart.is_empty() {
         String::new()
     } else {
@@ -561,26 +629,13 @@ pub fn render(data: &Data, today: NaiveDate, month: NaiveDate, week_start: Day) 
 
     format!(
         r#"<!doctype html>
-<html lang="en">
+<html lang="en" data-palette="{palette}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Habit report · {month_name}</title>
 <style>
-:root {{
-  color-scheme: light dark;
-  --bg: #f4f1ea; --card: #fffdf8; --ink: #23211c; --muted: #7b7466;
-  --line: #e6e0d3; --done: #3d8a5f; --cheat: #3f7f99; --missed: #b4574f;
-  --pending: #c58b2d; --blank: #efeae0; --shadow: rgba(50, 44, 32, .06);
-}}
-@media (prefers-color-scheme: dark) {{
-  :root {{
-    --bg: #171815; --card: #21231f; --ink: #ece9e0; --muted: #a29d90;
-    --line: #34362f; --done: #72b98c; --cheat: #72aec2; --missed: #d67f76;
-    --pending: #d8ab5f; --blank: #2a2c27; --shadow: rgba(0, 0, 0, .35);
-  }}
-}}
-* {{ box-sizing: border-box; }}
+{palette_css}* {{ box-sizing: border-box; }}
 body {{
   margin: 0; padding: 2.5rem 1.25rem 3rem; background: var(--bg); color: var(--ink);
   font: 15px/1.55 ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
@@ -609,15 +664,15 @@ h1 {{ margin: .3rem 0 .5rem; font-size: clamp(2.2rem, 6vw, 3.6rem); letter-spaci
 .legend {{ margin: 0; color: var(--muted); font-size: 12px; }}
 .legend .key {{ display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin: 0 .3rem 0 .7rem; }}
 .legend .key:first-child {{ margin-left: 0; }}
-.key.daily {{ background: var(--done); opacity: .4; }}
-.key.average {{ background: var(--done); }}
-.chart {{ width: 100%; height: auto; color: var(--done); display: block; }}
+.key.daily {{ background: var(--accent); opacity: .4; }}
+.key.average {{ background: var(--accent); }}
+.chart {{ width: 100%; height: auto; color: var(--accent); display: block; }}
 .chart text {{ fill: var(--muted); font-size: 10px; }}
 .chart .chart-grid {{ stroke: var(--line); stroke-width: 1; }}
 .chart .target {{ stroke: var(--muted); stroke-dasharray: 4 4; stroke-opacity: .35; }}
 .chart .area {{ fill: url(#chart-fill); }}
-.chart .daily {{ fill: none; stroke: var(--done); stroke-opacity: .35; stroke-width: 1.5; stroke-linejoin: round; }}
-.chart .average {{ fill: none; stroke: var(--done); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }}
+.chart .daily {{ fill: none; stroke: var(--accent); stroke-opacity: .35; stroke-width: 1.5; stroke-linejoin: round; }}
+.chart .average {{ fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }}
 .chart .hover {{ fill: transparent; }}
 .chart .hover:hover {{ fill: var(--ink); fill-opacity: .05; }}
 .section-head {{ display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin: 2rem 0 .8rem; }}
@@ -638,13 +693,13 @@ h2 {{ margin: 0; font-size: 1.15rem; letter-spacing: -.01em; }}
 .weekdays span {{ color: var(--muted); font-size: 10px; text-align: center; text-transform: uppercase; letter-spacing: .05em; }}
 .day {{ position: relative; display: flex; align-items: center; justify-content: center; padding: .5rem 0; border-radius: 6px; background: var(--blank); font-size: 12px; }}
 .day.blank {{ background: transparent; }}
-.day.done {{ background: var(--done); color: #fff; }}
-.day.cheat {{ background: var(--cheat); color: #fff; }}
-.day.missed {{ background: var(--missed); color: #fff; }}
-.day.pending {{ background: var(--pending); color: #fff; }}
+.day.done {{ background: var(--done); color: var(--bg); }}
+.day.cheat {{ background: var(--cheat); color: var(--bg); }}
+.day.missed {{ background: var(--missed); color: var(--bg); }}
+.day.pending {{ background: var(--pending); color: var(--bg); }}
 .day.muted {{ color: var(--muted); }}
 .day.has-note::after {{ content: ""; position: absolute; right: 5px; bottom: 4px; width: 5px; height: 5px; border-radius: 50%; background: var(--ink); opacity: .55; }}
-.day.done.has-note::after, .day.cheat.has-note::after, .day.missed.has-note::after, .day.pending.has-note::after {{ background: #fff; opacity: .9; }}
+.day.done.has-note::after, .day.cheat.has-note::after, .day.missed.has-note::after, .day.pending.has-note::after {{ background: var(--bg); opacity: .9; }}
 .notes {{ margin-top: 1rem; border-top: 1px solid var(--line); padding-top: .8rem; }}
 .notes h3 {{ margin: 0 0 .45rem; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .1em; }}
 .notes ul {{ list-style: none; margin: 0; padding: 0; display: grid; gap: .45rem; }}
@@ -703,6 +758,8 @@ footer {{ margin-top: 2rem; color: var(--muted); font-size: 12px; text-align: ce
         cheat_days = plural(cheats, "excused day"),
         chart_html = chart_html,
         habits_html = habits_html,
+        palette_css = palette_css,
+        palette = theme.label(),
         version = env!("CARGO_PKG_VERSION"),
     )
 }
@@ -747,7 +804,13 @@ mod tests {
             data.log
                 .set(date(&format!("2026-11-{day:02}")), "gym", true);
         }
-        let html = render(&data, today, date("2026-11-01"), Day::Mon);
+        let html = render(
+            &data,
+            today,
+            date("2026-11-01"),
+            Day::Mon,
+            ThemeName::Terminal,
+        );
         assert!(html.contains("<h1>November 2026</h1>"));
         assert!(html.contains("Gym"));
         assert!(html.contains("<strong>5</strong><span>check-ins</span>"));
@@ -766,7 +829,13 @@ mod tests {
             data.log
                 .set(date(&format!("2026-11-{day:02}")), "gym", true);
         }
-        let html = render(&data, today, date("2026-11-01"), Day::Mon);
+        let html = render(
+            &data,
+            today,
+            date("2026-11-01"),
+            Day::Mon,
+            ThemeName::Terminal,
+        );
         assert!(html.contains("<strong>100%</strong><span>of target</span>"));
     }
 
@@ -779,7 +848,13 @@ mod tests {
         for day in ["2026-11-02", "2026-11-04"] {
             data.log.set(date(day), "gym", true);
         }
-        let html = render(&data, today, date("2026-11-01"), Day::Mon);
+        let html = render(
+            &data,
+            today,
+            date("2026-11-01"),
+            Day::Mon,
+            ThemeName::Terminal,
+        );
         assert!(html.contains("2 check-ins"));
         assert!(html.contains("1/6 weeks met"));
     }
@@ -792,10 +867,51 @@ mod tests {
             .add_habit("<Gym & \"co\">", Schedule::Daily, date("2026-11-01"))
             .unwrap();
         data.habits[index].tags = vec!["health & <fitness>".into()];
-        let html = render(&data, today, date("2026-11-01"), Day::Mon);
+        let html = render(
+            &data,
+            today,
+            date("2026-11-01"),
+            Day::Mon,
+            ThemeName::Terminal,
+        );
         assert!(html.contains("&lt;Gym &amp; &quot;co&quot;&gt;"));
         assert!(html.contains("#health &amp; &lt;fitness&gt;"));
         assert!(!html.contains("<Gym"));
+    }
+
+    #[test]
+    fn the_report_uses_the_app_palette_and_can_be_repainted_from_the_file() {
+        let today = date("2026-11-10");
+        let mut data = Data::default();
+        data.add_habit("Gym", Schedule::Daily, date("2026-11-01"))
+            .unwrap();
+
+        let html = render(
+            &data,
+            today,
+            date("2026-11-01"),
+            Day::Mon,
+            ThemeName::Gruvbox,
+        );
+        assert!(html.contains(r#"<html lang="en" data-palette="gruvbox">"#));
+        assert!(html.contains("--bg: #fbf1c7"), "gruvbox light background");
+        assert!(html.contains("--done: #79740e"), "gruvbox light done");
+        // Every other palette is carried too, so switching is one attribute.
+        assert!(html.contains(r#"[data-palette="catppuccin"] {"#));
+        assert!(html.contains("--done: #a6e3a1"), "catppuccin dark done");
+
+        let plain = render(
+            &data,
+            today,
+            date("2026-11-01"),
+            Day::Mon,
+            ThemeName::Terminal,
+        );
+        assert!(
+            plain.contains("--bg: #f4f1ea"),
+            "terminal keeps the warm neutrals"
+        );
+        assert!(plain.contains(r#"data-palette="terminal""#));
     }
 
     #[test]
@@ -805,6 +921,7 @@ mod tests {
             date("2026-11-10"),
             date("2026-11-01"),
             Day::Mon,
+            ThemeName::Terminal,
         );
         assert!(html.contains("No habits were running in this month."));
     }
@@ -819,7 +936,13 @@ mod tests {
             data.log
                 .set(date(&format!("2026-11-{day:02}")), "gym", true);
         }
-        let html = render(&data, today, date("2026-11-01"), Day::Mon);
+        let html = render(
+            &data,
+            today,
+            date("2026-11-01"),
+            Day::Mon,
+            ThemeName::Terminal,
+        );
         assert!(html.contains("Month at a glance"));
         assert!(html.contains("class=\"chart\""));
         assert!(html.contains("class=\"daily\""));
@@ -841,7 +964,13 @@ mod tests {
         data.habits[index].set_note(date("2026-11-03"), "felt strong & fast");
         data.habits[index].note = Some("ten minutes\nno pressure".into());
 
-        let html = render(&data, today, date("2026-11-01"), Day::Mon);
+        let html = render(
+            &data,
+            today,
+            date("2026-11-01"),
+            Day::Mon,
+            ThemeName::Terminal,
+        );
         assert!(
             html.contains("class=\"day done has-note\""),
             "the day cell should mark the note"
@@ -862,7 +991,13 @@ mod tests {
         data.add_habit("Gym", Schedule::Daily, date("2026-11-01"))
             .unwrap();
         data.log.set(date("2026-11-03"), "gym", true);
-        let html = render(&data, today, date("2026-11-01"), Day::Mon);
+        let html = render(
+            &data,
+            today,
+            date("2026-11-01"),
+            Day::Mon,
+            ThemeName::Terminal,
+        );
         assert!(!html.contains("class=\"day done has-note\""));
         assert!(!html.contains("<div class=\"notes\">"));
     }
@@ -875,7 +1010,13 @@ mod tests {
             .unwrap();
         data.habits[0].archived = true;
         data.log.set(date("2026-11-02"), "gym", true);
-        let html = render(&data, today, date("2026-11-01"), Day::Mon);
+        let html = render(
+            &data,
+            today,
+            date("2026-11-01"),
+            Day::Mon,
+            ThemeName::Terminal,
+        );
         assert!(html.contains("archived"));
         assert!(html.contains("Gym"));
     }

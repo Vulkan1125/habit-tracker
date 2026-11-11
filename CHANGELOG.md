@@ -6,7 +6,18 @@ All notable changes to `habit` are recorded here. The format follows
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **Reports you can repaint from inside the file.** Every monthly HTML report now carries all seven
+  palettes. It opens in the theme from `config.toml`, and changing `data-palette` on the `<html>`
+  element — or editing the hex values in the `:root` block — restyles the page without regenerating
+  it.
+
+### Changed
+
+- **Monthly reports use the app's palette** instead of fixed warm colours. The chart takes the
+  theme accent, status cells take their text colour from the page background, and `terminal` and
+  `mono` keep worked-out neutral and grey variants.
 
 ## [0.10.0] — 2026-11-11
 

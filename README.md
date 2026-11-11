@@ -357,6 +357,12 @@ together with any note written that day. Notes are also listed under each habit,
 day cell that has one. It reads well in a browser, prints cleanly, and can be committed, attached to
 a mail or turned into a PDF.
 
+The page inherits the palette you use in the app: `theme` in `config.toml` decides its colours, in
+the same light and dark variants as the terminal. Every palette is carried inside the file, so a
+finished report can be repainted without running anything — change `data-palette` on the `<html>`
+element, for example `<html lang="en" data-palette="gruvbox">`, or edit the hex values in the
+`:root` block at the top of the stylesheet.
+
 ![The monthly HTML report, one card per habit](docs/screenshots/report.png)
 
 To have it happen by itself, schedule it:

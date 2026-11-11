@@ -86,7 +86,7 @@ fn run() -> Result<()> {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating {}", parent.display()))?;
     }
-    let html = report::render(&data, today, anchor, config.week_start);
+    let html = report::render(&data, today, anchor, config.week_start, config.theme);
     std::fs::write(&path, html).with_context(|| format!("writing {}", path.display()))?;
     println!("wrote {}", pretty_path(&path));
 

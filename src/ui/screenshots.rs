@@ -459,6 +459,12 @@ fn write_readme_screenshots() {
     );
 
     let data = demo_data(today);
-    let html = habit::report::render(&data, today, habit::report::last_month(today), Day::Mon);
+    let html = habit::report::render(
+        &data,
+        today,
+        habit::report::last_month(today),
+        Day::Mon,
+        ThemeName::Catppuccin,
+    );
     write(dir, "report.html", &html);
 }

@@ -86,6 +86,149 @@ impl ColorMode {
     }
 }
 
+/// A truecolour value, used by the HTML report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rgb(pub u8, pub u8, pub u8);
+
+impl Rgb {
+    pub fn hex(self) -> String {
+        format!("#{:02x}{:02x}{:02x}", self.0, self.1, self.2)
+    }
+
+    /// A point between two colours: `t = 0.0` is `self`, `1.0` is `other`.
+    fn mix(self, other: Rgb, t: f64) -> Rgb {
+        let blend = |a: u8, b: u8| (f64::from(a) + (f64::from(b) - f64::from(a)) * t).round() as u8;
+        Rgb(
+            blend(self.0, other.0),
+            blend(self.1, other.1),
+            blend(self.2, other.2),
+        )
+    }
+}
+
+/// The colour variables of an HTML report.
+///
+/// Reports are always written in full colour, so this is the raw palette
+/// without the terminal-capability downgrades [`Theme`] applies. Terminal and
+/// mono have no truecolour palette of their own; they get neutral stand-ins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WebPalette {
+    pub bg: Rgb,
+    pub card: Rgb,
+    pub ink: Rgb,
+    pub muted: Rgb,
+    pub line: Rgb,
+    pub blank: Rgb,
+    pub accent: Rgb,
+    pub done: Rgb,
+    pub cheat: Rgb,
+    pub missed: Rgb,
+    pub pending: Rgb,
+}
+
+/// The report palette for a theme and mode.
+pub fn web_palette(name: ThemeName, mode: ColorMode) -> WebPalette {
+    match name {
+        ThemeName::Terminal => terminal_web(mode),
+        ThemeName::Mono => mono_web(mode),
+        _ => {
+            let raw = palette(name, mode);
+            let bg = rgb_of(raw.bg);
+            let line = as_rgb(raw.border);
+            WebPalette {
+                bg,
+                card: rgb_of(raw.surface),
+                ink: rgb_of(raw.fg),
+                muted: as_rgb(raw.dim),
+                line,
+                // The empty day cells sit between the page and its borders.
+                blank: bg.mix(line, 0.5),
+                accent: as_rgb(raw.accent),
+                done: as_rgb(raw.done),
+                cheat: as_rgb(raw.cheat),
+                missed: as_rgb(raw.missed),
+                pending: as_rgb(raw.warn),
+            }
+        }
+    }
+}
+
+fn as_rgb(color: Color) -> Rgb {
+    match color {
+        Color::Rgb(r, g, b) => Rgb(r, g, b),
+        // Only Terminal and Mono reach this, and they are handled above.
+        _ => Rgb(0, 0, 0),
+    }
+}
+
+fn rgb_of(color: Option<Color>) -> Rgb {
+    color.map(as_rgb).unwrap_or(Rgb(0, 0, 0))
+}
+
+/// The report's original warm neutrals, for terminals that name their colours.
+fn terminal_web(mode: ColorMode) -> WebPalette {
+    match mode {
+        ColorMode::Dark => WebPalette {
+            bg: Rgb(0x17, 0x18, 0x15),
+            card: Rgb(0x21, 0x23, 0x1f),
+            ink: Rgb(0xec, 0xe9, 0xe0),
+            muted: Rgb(0xa2, 0x9d, 0x90),
+            line: Rgb(0x34, 0x36, 0x2f),
+            blank: Rgb(0x2a, 0x2c, 0x27),
+            accent: Rgb(0x72, 0xae, 0xc2),
+            done: Rgb(0x72, 0xb9, 0x8c),
+            cheat: Rgb(0x72, 0xae, 0xc2),
+            missed: Rgb(0xd6, 0x7f, 0x76),
+            pending: Rgb(0xd8, 0xab, 0x5f),
+        },
+        ColorMode::Light => WebPalette {
+            bg: Rgb(0xf4, 0xf1, 0xea),
+            card: Rgb(0xff, 0xfd, 0xf8),
+            ink: Rgb(0x23, 0x21, 0x1c),
+            muted: Rgb(0x7b, 0x74, 0x66),
+            line: Rgb(0xe6, 0xe0, 0xd3),
+            blank: Rgb(0xef, 0xea, 0xe0),
+            accent: Rgb(0x3f, 0x7f, 0x99),
+            done: Rgb(0x3d, 0x8a, 0x5f),
+            cheat: Rgb(0x3f, 0x7f, 0x99),
+            missed: Rgb(0xb4, 0x57, 0x4f),
+            pending: Rgb(0xc5, 0x8b, 0x2d),
+        },
+    }
+}
+
+/// Greys only: weight carries the status, as in the terminal.
+fn mono_web(mode: ColorMode) -> WebPalette {
+    match mode {
+        ColorMode::Dark => WebPalette {
+            bg: Rgb(0x10, 0x10, 0x10),
+            card: Rgb(0x1a, 0x1a, 0x1a),
+            ink: Rgb(0xf0, 0xf0, 0xf0),
+            muted: Rgb(0x8a, 0x8a, 0x8a),
+            line: Rgb(0x2c, 0x2c, 0x2c),
+            blank: Rgb(0x20, 0x20, 0x20),
+            accent: Rgb(0xc8, 0xc8, 0xc8),
+            done: Rgb(0xd0, 0xd0, 0xd0),
+            cheat: Rgb(0xa8, 0xa8, 0xa8),
+            missed: Rgb(0x8c, 0x8c, 0x8c),
+            pending: Rgb(0x6e, 0x6e, 0x6e),
+        },
+        ColorMode::Light => WebPalette {
+            bg: Rgb(0xff, 0xff, 0xff),
+            card: Rgb(0xf7, 0xf7, 0xf7),
+            ink: Rgb(0x11, 0x11, 0x11),
+            muted: Rgb(0x6b, 0x6b, 0x6b),
+            line: Rgb(0xdc, 0xdc, 0xdc),
+            blank: Rgb(0xee, 0xee, 0xee),
+            accent: Rgb(0x44, 0x44, 0x44),
+            done: Rgb(0x22, 0x22, 0x22),
+            cheat: Rgb(0x44, 0x44, 0x44),
+            missed: Rgb(0x66, 0x66, 0x66),
+            pending: Rgb(0x88, 0x88, 0x88),
+        },
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Caps {
     TrueColor,
@@ -633,5 +776,63 @@ mod tests {
         assert_eq!(ThemeName::parse("neon"), None);
         assert_eq!(ColorMode::parse("latte"), Some(ColorMode::Light));
         assert_eq!(ColorMode::parse("dusk"), None);
+    }
+
+    #[test]
+    fn web_palettes_follow_the_theme_and_its_mode() {
+        let dark = web_palette(ThemeName::Catppuccin, ColorMode::Dark);
+        let light = web_palette(ThemeName::Catppuccin, ColorMode::Light);
+        assert_eq!(dark.done.hex(), "#a6e3a1");
+        assert_eq!(light.bg.hex(), "#eff1f5");
+        assert_ne!(dark.bg, light.bg);
+        // Empty cells are mixed between the page and its borders.
+        assert_eq!(dark.blank, dark.bg.mix(dark.line, 0.5));
+    }
+
+    #[test]
+    fn every_theme_has_a_full_colour_web_palette() {
+        for name in ThemeName::ALL {
+            for mode in [ColorMode::Dark, ColorMode::Light] {
+                let palette = web_palette(name, mode);
+                for colour in [
+                    palette.bg,
+                    palette.card,
+                    palette.ink,
+                    palette.muted,
+                    palette.line,
+                    palette.blank,
+                    palette.accent,
+                    palette.done,
+                    palette.cheat,
+                    palette.missed,
+                    palette.pending,
+                ] {
+                    let hex = colour.hex();
+                    assert_eq!(hex.len(), 7, "{}", name.label());
+                    assert!(hex.starts_with('#'));
+                }
+                assert_ne!(
+                    palette.bg,
+                    palette.ink,
+                    "{} {} should be readable",
+                    name.label(),
+                    mode.label()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn mono_reports_are_grey() {
+        for mode in [ColorMode::Dark, ColorMode::Light] {
+            let palette = web_palette(ThemeName::Mono, mode);
+            for colour in [palette.done, palette.cheat, palette.missed, palette.pending] {
+                assert_eq!(
+                    (colour.0, colour.1, colour.2),
+                    (colour.0, colour.0, colour.0),
+                    "mono should not carry a hue"
+                );
+            }
+        }
     }
 }
