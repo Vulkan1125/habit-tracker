@@ -6,13 +6,14 @@ use anyhow::{Context, Result, bail};
 use chrono::{Duration, NaiveDate, NaiveTime};
 use clap::{Parser, Subcommand};
 
-use crate::config::Config;
-use crate::format::{pad_left, pad_right, truncate, width};
-use crate::model::{Data, Day, Habit, Schedule, normalize_tag};
-use crate::reminders;
-use crate::stats;
-use crate::store::Store;
-use crate::theme::ThemeName;
+use habit::config::Config;
+use habit::format::{pad_left, pad_right, truncate, width};
+use habit::model::{Data, Day, Habit, Schedule, normalize_tag};
+use habit::modules;
+use habit::reminders;
+use habit::stats;
+use habit::store::Store;
+use habit::theme::ThemeName;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -226,10 +227,33 @@ pub enum Command {
         #[command(subcommand)]
         action: ScheduleAction,
     },
+    /// List, install or remove optional feature modules
+    Modules {
+        #[command(subcommand)]
+        action: Option<ModulesAction>,
+    },
     /// Print the effective configuration
     Config,
     /// List the available themes
     Themes,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ModulesAction {
+    /// List every module and whether it is installed
+    List,
+    /// Install a module (notify or report)
+    Install {
+        /// Module name: notify or report
+        #[arg(value_name = "NAME")]
+        name: String,
+    },
+    /// Remove an installed module and its scheduled jobs
+    Remove {
+        /// Module name: notify or report
+        #[arg(value_name = "NAME")]
+        name: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -297,6 +321,9 @@ pub fn run(
             description,
             remind,
         } => {
+            if remind.is_some() {
+                ensure_module(store, "notify")?;
+            }
             let schedule = parse_schedule(weekly, days)?;
             let reminder = remind.as_deref().map(parse_time).transpose()?;
             let start = start.unwrap_or(today);
@@ -525,8 +552,19 @@ pub fn run(
             dry_run,
             always,
         } => {
-            let at = at.as_deref().map(parse_time).transpose()?;
-            remind(data, today, config, at, dry_run, always)?;
+            let mut args = Vec::new();
+            if let Some(at) = at {
+                parse_time(&at)?;
+                args.push("--at".to_string());
+                args.push(at);
+            }
+            if dry_run {
+                args.push("--dry-run".to_string());
+            }
+            if always {
+                args.push("--always".to_string());
+            }
+            run_module(store, today, "notify", &args)?;
         }
         Command::Report {
             month,
@@ -534,23 +572,33 @@ pub fn run(
             output,
             open,
             notify,
-        } => report(
-            store,
-            data,
-            today,
-            config,
-            ReportOptions {
-                month,
-                last_month,
-                output,
-                open,
-                notify,
-            },
-        )?,
+        } => {
+            let mut args = Vec::new();
+            if let Some(month) = month {
+                args.push("--month".to_string());
+                args.push(month);
+            }
+            if last_month {
+                args.push("--last-month".to_string());
+            }
+            if let Some(output) = output {
+                args.push("--output".to_string());
+                args.push(output.display().to_string());
+            }
+            if open {
+                args.push("--open".to_string());
+            }
+            if notify {
+                args.push("--notify".to_string());
+            }
+            run_module(store, today, "report", &args)?;
+        }
         Command::RemindTime { habit, time, clear } => {
+            ensure_module(store, "notify")?;
             remind_time(store, data, today, &habit, time.as_deref(), clear)?
         }
         Command::Schedule { action } => schedule(store, data, today, action)?,
+        Command::Modules { action } => modules_command(store, data, action)?,
         Command::Config => {
             let path = Config::path();
             let state = match &path {
@@ -584,101 +632,120 @@ pub fn run(
     Ok(())
 }
 
-/// Everything the `report` command needs, so the signature stays readable.
-struct ReportOptions {
-    month: Option<String>,
-    last_month: bool,
-    output: Option<std::path::PathBuf>,
-    open: bool,
-    notify: bool,
-}
-
-fn report(
-    store: &Store,
-    data: &Data,
-    today: NaiveDate,
-    config: &Config,
-    options: ReportOptions,
-) -> Result<()> {
-    let anchor = if options.last_month {
-        crate::report::last_month(today)
-    } else if let Some(text) = options.month.as_deref() {
-        crate::report::month_start(text)?
-    } else {
-        today
-    };
-    let path = options
-        .output
-        .unwrap_or_else(|| crate::report::path_for(store.path(), anchor));
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("creating {}", parent.display()))?;
-    }
-    let html = crate::report::render(data, today, anchor, config.week_start);
-    std::fs::write(&path, html).with_context(|| format!("writing {}", path.display()))?;
-    println!("wrote {}", pretty(&path));
-    if options.notify {
-        let title = format!("Habit report · {}", anchor.format("%B %Y"));
-        let body = path.display().to_string();
-        if let Err(error) = reminders::notify(&title, &body, false) {
-            eprintln!("habit: report written, but the notification failed: {error:#}");
-        }
-    }
-    if options.open {
-        let command = if cfg!(target_os = "macos") {
-            "open"
-        } else if cfg!(target_os = "linux") {
-            "xdg-open"
-        } else {
-            bail!(
-                "no program known for opening files on this platform; open {} yourself",
-                path.display()
-            );
-        };
-        std::process::Command::new(command)
-            .arg(&path)
-            .status()
-            .with_context(|| format!("opening {}", path.display()))?;
+/// Fail with a useful hint when a feature's module is not installed.
+fn ensure_module(store: &Store, name: &str) -> Result<()> {
+    if !modules::path_for(store.path(), name).is_file() {
+        bail!("the {name} module is not installed · run `habit modules install {name}`");
     }
     Ok(())
 }
 
-fn remind(
-    data: &Data,
-    today: NaiveDate,
-    config: &Config,
-    at: Option<NaiveTime>,
-    dry_run: bool,
-    always: bool,
-) -> Result<()> {
-    if !data.habits.iter().any(|habit| habit.reminder.is_some()) {
-        println!("no reminders set — give a habit one with `habit remind-time <habit> 09:00`");
-        return Ok(());
+/// Run an installed module, forwarding its output and exit status.
+fn run_module(store: &Store, today: NaiveDate, name: &str, args: &[String]) -> Result<()> {
+    ensure_module(store, name)?;
+    let path = modules::path_for(store.path(), name);
+    let data_path =
+        std::path::absolute(store.path()).unwrap_or_else(|_| store.path().to_path_buf());
+    let status = std::process::Command::new(&path)
+        .arg("--data")
+        .arg(data_path)
+        .arg("--today")
+        .arg(today.to_string())
+        .args(args)
+        .status()
+        .with_context(|| format!("running {}", path.display()))?;
+    if !status.success() {
+        bail!("the {name} module exited with {status}");
     }
+    Ok(())
+}
 
-    let open = reminders::pending(data, today, config.week_start, at);
-    if open.is_empty() {
-        // A stale unit for a time no habit uses should stay quiet.
-        if at.is_some_and(|time| !data.habits.iter().any(|habit| habit.reminder == Some(time))) {
-            return Ok(());
-        }
-        if always {
-            let title = "habit · all clear";
-            let body = "All habits are done for today";
-            if reminders::notify(title, body, dry_run)? || dry_run {
-                println!("{title}\n{body}");
+fn modules_command(store: &Store, data: &Data, action: Option<ModulesAction>) -> Result<()> {
+    match action.unwrap_or(ModulesAction::List) {
+        ModulesAction::List => {
+            let installed = modules::Modules::detect(store.path());
+            println!(
+                "{} {} what it adds",
+                pad_right("MODULE", 9),
+                pad_right("STATUS", 14)
+            );
+            let mut missing = 0;
+            for module in modules::ALL {
+                let status = if installed.installed(module.name) {
+                    "installed"
+                } else if modules::source(module.name).is_some() {
+                    missing += 1;
+                    "not installed"
+                } else {
+                    "unavailable"
+                };
+                println!(
+                    "{} {} {}",
+                    pad_right(module.name, 9),
+                    pad_right(status, 14),
+                    module.description
+                );
             }
-        } else {
-            println!("nothing left today · all clear");
+            if missing > 0 {
+                println!("\ninstall one with `habit modules install <name>`");
+            }
+            if modules::NAMES
+                .iter()
+                .any(|name| modules::source(name).is_none())
+            {
+                println!("`unavailable` means this habit build did not ship that module");
+            }
         }
-        return Ok(());
-    }
-
-    let (title, body) = reminders::message(&open);
-    if reminders::notify(&title, &body, dry_run)? {
-        println!("{title} · {body}");
-    } else {
-        println!("{title}\n{body}");
+        ModulesAction::Install { name } => {
+            if !modules::NAMES.contains(&name.as_str()) {
+                bail!(
+                    "unknown module \"{name}\" (choose from {})",
+                    modules::NAMES.join(", ")
+                );
+            }
+            let path = modules::install(store.path(), &name)?;
+            println!("installed {name} · {}", habit::format::pretty_path(&path));
+            match name.as_str() {
+                "notify" => {
+                    if data.habits.iter().any(|habit| habit.reminder.is_some()) {
+                        print_reminder_guidance();
+                    }
+                }
+                "report" => {
+                    println!(
+                        "  run `habit report` for this month, or `habit schedule reports install`"
+                    );
+                }
+                _ => {}
+            }
+        }
+        ModulesAction::Remove { name } => {
+            if !modules::NAMES.contains(&name.as_str()) {
+                bail!(
+                    "unknown module \"{name}\" (choose from {})",
+                    modules::NAMES.join(", ")
+                );
+            }
+            let (removed, jobs) = modules::remove_with_jobs(store.path(), &name)?;
+            if removed {
+                println!("removed the {name} module");
+            } else {
+                println!("the {name} module was not installed");
+            }
+            if jobs > 0 {
+                println!(
+                    "stopped {}",
+                    habit::format::plural(jobs as u32, "scheduled job")
+                );
+            }
+            match name.as_str() {
+                "notify" => {
+                    println!("  reminder times stay saved; install it again to bring them back")
+                }
+                "report" => println!("  existing report files are left alone"),
+                _ => {}
+            }
+        }
     }
     Ok(())
 }
@@ -726,7 +793,7 @@ fn refresh_reminders(data: &Data, today: NaiveDate, store: &Store) -> Result<()>
         let count = sync_reminders(data, today, store)?;
         println!(
             "schedule refreshed · {}",
-            crate::format::plural(count as u32, "time")
+            habit::format::plural(count as u32, "time")
         );
     } else {
         print_reminder_guidance();
@@ -750,19 +817,9 @@ fn sync_reminders(data: &Data, today: NaiveDate, store: &Store) -> Result<usize>
     Ok(times.len())
 }
 
-/// Show paths under the home directory as `~/…`, like the docs do.
-fn pretty(path: &std::path::Path) -> String {
-    if let Some(home) = std::env::var_os("HOME")
-        && let Ok(rest) = path.strip_prefix(std::path::PathBuf::from(home))
-    {
-        return format!("~/{}", rest.display());
-    }
-    path.display().to_string()
-}
-
 fn print_units(units: &reminders::Units) {
     for unit in &units.units {
-        println!("# {}", pretty(&unit.path));
+        println!("# {}", habit::format::pretty_path(&unit.path));
         print!("{}", unit.body);
         if !unit.body.ends_with('\n') {
             println!();
@@ -780,6 +837,7 @@ fn schedule(store: &Store, data: &Data, today: NaiveDate, action: ScheduleAction
 
     match action {
         ScheduleAction::Install { dry_run } => {
+            ensure_module(store, "notify")?;
             let times = reminders::times(data, today);
             let units = reminders::reminder_units(platform, &program, &data_path, &times)?;
             if dry_run {
@@ -792,7 +850,7 @@ fn schedule(store: &Store, data: &Data, today: NaiveDate, action: ScheduleAction
             }
             let removed = reminders::sync(platform, &units, &reminders::REMINDER_PREFIXES)?;
             for path in removed {
-                println!("removed stale {}", pretty(&path));
+                println!("removed stale {}", habit::format::pretty_path(&path));
             }
             if times.is_empty() {
                 println!(
@@ -806,17 +864,17 @@ fn schedule(store: &Store, data: &Data, today: NaiveDate, action: ScheduleAction
                     .join(", ");
                 println!(
                     "reminders installed for {labels} · {}",
-                    crate::format::plural(times.len() as u32, "time")
+                    habit::format::plural(times.len() as u32, "time")
                 );
                 for unit in &units.units {
-                    println!("  {}", pretty(&unit.path));
+                    println!("  {}", habit::format::pretty_path(&unit.path));
                 }
             }
         }
         ScheduleAction::Remove { dry_run } => {
             if dry_run {
                 for path in reminders::installed(platform, &reminders::REMINDER_PREFIXES)? {
-                    println!("would remove {}", pretty(&path));
+                    println!("would remove {}", habit::format::pretty_path(&path));
                 }
                 return Ok(());
             }
@@ -825,7 +883,7 @@ fn schedule(store: &Store, data: &Data, today: NaiveDate, action: ScheduleAction
                 println!("no scheduled reminder found");
             } else {
                 for path in removed {
-                    println!("removed {}", pretty(&path));
+                    println!("removed {}", habit::format::pretty_path(&path));
                 }
             }
         }
@@ -847,10 +905,17 @@ fn schedule(store: &Store, data: &Data, today: NaiveDate, action: ScheduleAction
                 } else {
                     "written, not loaded"
                 };
-                println!("{} {}", pad_right(state, 20), pretty(path));
+                println!(
+                    "{} {}",
+                    pad_right(state, 20),
+                    habit::format::pretty_path(path)
+                );
             }
         }
         ScheduleAction::Reports { action } => {
+            if matches!(action, ReportScheduleAction::Install { .. }) {
+                ensure_module(store, "report")?;
+            }
             schedule_reports(store, today, &program, &data_path, action)?;
         }
     }
@@ -875,21 +940,21 @@ fn schedule_reports(
             }
             let removed = reminders::sync(platform, &units, &reminders::REPORT_PREFIXES)?;
             for path in removed {
-                println!("removed stale {}", pretty(&path));
+                println!("removed stale {}", habit::format::pretty_path(&path));
             }
             println!(
                 "monthly report scheduled for day {day} at {} · {}",
                 at.format("%H:%M"),
-                pretty(&crate::report::path_for(
+                habit::format::pretty_path(&habit::report::path_for(
                     store.path(),
-                    crate::report::last_month(today)
+                    habit::report::last_month(today)
                 ))
             );
         }
         ReportScheduleAction::Remove { dry_run } => {
             if dry_run {
                 for path in reminders::installed(platform, &reminders::REPORT_PREFIXES)? {
-                    println!("would remove {}", pretty(&path));
+                    println!("would remove {}", habit::format::pretty_path(&path));
                 }
                 return Ok(());
             }
@@ -898,7 +963,7 @@ fn schedule_reports(
                 println!("no monthly report job found");
             } else {
                 for path in removed {
-                    println!("removed {}", pretty(&path));
+                    println!("removed {}", habit::format::pretty_path(&path));
                 }
             }
         }
@@ -920,7 +985,11 @@ fn schedule_reports(
                 } else {
                     "written, not loaded"
                 };
-                println!("{} {}", pad_right(state, 20), pretty(path));
+                println!(
+                    "{} {}",
+                    pad_right(state, 20),
+                    habit::format::pretty_path(path)
+                );
             }
         }
     }
@@ -1067,7 +1136,7 @@ fn print_list(data: &Data, today: NaiveDate, config: &Config, tags: &[String]) -
     println!(
         "Today: {} done · {} · space toggles in the TUI",
         data.done_today(today),
-        crate::format::plural(active, "active habit")
+        habit::format::plural(active, "active habit")
     );
     Ok(())
 }
@@ -1135,7 +1204,7 @@ fn print_stats(
             completion.percent(),
             completion.done,
             completion.possible,
-            crate::format::plural(days, "day")
+            habit::format::plural(days, "day")
         );
         println!(
             "  {} {}",
@@ -1200,7 +1269,7 @@ fn print_log(data: &Data, today: NaiveDate, count: u32, all: bool) {
     if printed == 0 {
         println!(
             "No check-ins in the last {}.",
-            crate::format::plural(count, "day")
+            habit::format::plural(count, "day")
         );
     }
 }
@@ -1217,7 +1286,7 @@ fn print_tags(data: &Data) {
         return;
     }
     for (tag, count) in counts {
-        println!("#{:<20} {}", tag, crate::format::plural(count, "habit"));
+        println!("#{:<20} {}", tag, habit::format::plural(count, "habit"));
     }
 }
 
@@ -1228,7 +1297,7 @@ fn rename_tag(store: &Store, data: &mut Data, from: &str, to: &str) -> Result<()
         Err(error) => bail!("{}", error.message()),
     };
     store.save(data)?;
-    let habits = crate::format::plural(outcome.habits as u32, "habit");
+    let habits = habit::format::plural(outcome.habits as u32, "habit");
     if outcome.merged {
         println!("merged #{} into #{} on {habits}", outcome.from, outcome.to);
     } else {
@@ -1263,6 +1332,89 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::resolve(Some(dir.path().join("data.json"))).unwrap();
         (dir, store)
+    }
+
+    #[cfg(unix)]
+    fn install_fake_module(store: &Store, name: &str) {
+        let dir = store.path().parent().unwrap().join("build");
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join(format!("habit-{name}"));
+        std::fs::write(&source, "#!/bin/sh\nexit 0\n").unwrap();
+        modules::install_from(store.path(), name, &source).unwrap();
+    }
+
+    fn remind() -> Command {
+        Command::Remind {
+            at: None,
+            dry_run: true,
+            always: false,
+        }
+    }
+
+    #[test]
+    fn reminder_and_report_commands_need_their_modules() {
+        let (_dir, store) = store();
+        let mut data = Data::default();
+        let today = date("2026-11-10");
+
+        let mut command = add("Gym");
+        if let Command::Add { remind, .. } = &mut command {
+            *remind = Some("09:00".into());
+        }
+        let error = run(command, &store, &mut data, today, &Config::default()).unwrap_err();
+        assert!(
+            error.to_string().contains("modules install notify"),
+            "{error}"
+        );
+        assert!(data.habits.is_empty(), "nothing may be saved");
+
+        let error = run(
+            Command::Report {
+                month: None,
+                last_month: false,
+                output: None,
+                open: false,
+                notify: false,
+            },
+            &store,
+            &mut data,
+            today,
+            &Config::default(),
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("modules install report"),
+            "{error}"
+        );
+
+        let error = run(remind(), &store, &mut data, today, &Config::default()).unwrap_err();
+        assert!(
+            error.to_string().contains("modules install notify"),
+            "{error}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_installed_module_is_executed() {
+        let (_dir, store) = store();
+        install_fake_module(&store, "notify");
+        let mut data = Data::default();
+        let today = date("2026-11-10");
+        run(add("Gym"), &store, &mut data, today, &Config::default()).unwrap();
+        assert!(modules::Modules::detect(store.path()).notify);
+        run(remind(), &store, &mut data, today, &Config::default()).unwrap();
+
+        run(
+            Command::Modules {
+                action: Some(ModulesAction::List),
+            },
+            &store,
+            &mut data,
+            today,
+            &Config::default(),
+        )
+        .unwrap();
     }
 
     #[test]

@@ -8,6 +8,49 @@ All notable changes to `habit` are recorded here. The format follows
 
 Nothing yet.
 
+## [0.8.0] — 2026-11-11
+
+### Added
+
+- **Optional feature modules.** The core app is now just check-ins, streaks, tags and the TUI.
+  Notifications and reports live in two companion binaries, `habit-notify` and `habit-report`, and
+  stay dormant until you install them:
+
+  ```sh
+  habit modules list              # what is installed, what is available
+  habit modules install notify    # reminder times and desktop notifications
+  habit modules install report    # monthly HTML pages
+  habit modules remove notify     # stop the feature and its scheduled jobs
+  ```
+
+  Modules are copied into `<data dir>/modules`, so a data file carries its own feature set.
+  Installing uses the copy shipped beside `habit` (release tarball, Homebrew, `cargo install`) and
+  never touches the network. `HABIT_MODULE_SOURCE` can point at another directory.
+- **A modules screen in the TUI.** `M` lists every module with its status; `enter` or `space`
+  installs or removes the highlighted one, and `esc` closes it. `habit modules` with no action is
+  the same list on the command line.
+- **Automatic migration for existing data.** On the first run after upgrading, reminders that are
+  already saved install the notifications module and an existing `reports/` directory installs the
+  reports module, so an upgrade never silently turns a feature off. An explicit
+  `habit modules remove` writes a marker so the next run does not bring it back.
+- **A smarter `install.sh`.** It detects whether Rust is installed and, when a build from source is
+  needed, offers to set Rust up with rustup. It installs all three binaries, supports macOS's
+  universal build as well as the Linux packages and static build, and at the end asks whether to
+  add the install directory to your shell's `PATH`. New flags: `--from-source` and `--no-path`.
+
+### Changed
+
+- `habit remind`, `habit remind-time`, `habit schedule install` and `habit report` now require
+  their module; when it is missing they name the exact `habit modules install …` command instead of
+  failing obscurely. `habit schedule reports install` needs the reports module.
+- Without the notifications module the add/edit dialog has no **Remind** row and the detail pane
+  hides a saved reminder; editing a habit keeps the time so reinstalling the module brings it back.
+  Without the reports module there is no report command at all — the core app stays lean.
+- **Starting later** is now separated from the habits running today by a blank line, so a group of
+  not-yet-started habits no longer runs into the active ones.
+- Release archives, `.deb`/`.rpm`/Arch packages and the Homebrew formula now ship `habit`,
+  `habit-notify` and `habit-report` together.
+
 ## [0.7.0] — 2026-11-11
 
 ### Added

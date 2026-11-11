@@ -12,6 +12,7 @@
 //! headless browser.
 
 use std::fmt::Write as _;
+use std::path::PathBuf;
 
 use chrono::{Datelike, Duration, NaiveDate};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -23,11 +24,11 @@ use unicode_width::UnicodeWidthStr;
 
 use super::draw;
 use crate::app::{App, Mode, Tab};
-use crate::config::Config;
-use crate::model::{Data, Day, Schedule};
-use crate::store::Store;
-use crate::theme::{ColorMode, ThemeName};
 use crate::ui::form::Form;
+use habit::config::Config;
+use habit::model::{Data, Day, Schedule};
+use habit::store::Store;
+use habit::theme::{ColorMode, ThemeName};
 
 fn date(text: &str) -> NaiveDate {
     NaiveDate::parse_from_str(text, "%Y-%m-%d").unwrap()
@@ -182,12 +183,18 @@ fn fill_until(data: &mut Data, index: usize, last: NaiveDate, salt: u32) {
 }
 
 fn demo_app(today: NaiveDate, theme: ThemeName, mode: ColorMode) -> App {
-    let dir = Box::leak(Box::new(tempfile::tempdir().unwrap()));
-    let store = Store::resolve(Some(dir.path().join("data.json"))).unwrap();
+    // A home-directory path keeps the modules screen reading `~/…` instead of a
+    // temporary directory. The demo data is never saved.
+    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
+    let store = Store::resolve(Some(home.join(".local/share/habit-demo/data.json"))).unwrap();
     let mut config = Config::default();
     config.theme = theme;
     config.mode = mode;
-    App::new(store, demo_data(today), today, &config)
+    let mut app = App::new(store, demo_data(today), today, &config);
+    // The screenshots show the full feature set, as it looks once the modules
+    // are installed.
+    app.modules.notify = true;
+    app
 }
 
 fn press(app: &mut App, code: KeyCode) {
@@ -347,6 +354,18 @@ fn write_readme_screenshots() {
     let dir = std::path::Path::new("docs/screenshots");
     std::fs::create_dir_all(dir).unwrap();
 
+    // The test binary has no module binaries beside it, so point the detector at
+    // a fake release directory: the overlay can then say "not installed" rather
+    // than "unavailable" for the module that is not installed.
+    let module_source = std::env::temp_dir().join("habit-screenshot-modules");
+    std::fs::create_dir_all(&module_source).unwrap();
+    for name in ["notify", "report"] {
+        std::fs::write(module_source.join(format!("habit-{name}")), b"").unwrap();
+    }
+    // SAFETY: this test is ignored and runs on its own; nothing else reads or
+    // writes the environment concurrently.
+    unsafe { std::env::set_var("HABIT_MODULE_SOURCE", &module_source) };
+
     let mut dark = demo_app(today, ThemeName::Catppuccin, ColorMode::Dark);
     let theme = dark.theme;
     let bg = theme.bg.unwrap_or(Color::Rgb(0, 0, 0));
@@ -426,7 +445,16 @@ fn write_readme_screenshots() {
         &screen_html(&frame, "habit · reminder setup", bg, fg),
     );
 
+    let mut modules = demo_app(today, ThemeName::Catppuccin, ColorMode::Dark);
+    modules.mode = Mode::Modules;
+    let frame = buffer(&mut modules, 108, 32);
+    write(
+        dir,
+        "modules.html",
+        &screen_html(&frame, "habit · modules", bg, fg),
+    );
+
     let data = demo_data(today);
-    let html = crate::report::render(&data, today, crate::report::last_month(today), Day::Mon);
+    let html = habit::report::render(&data, today, habit::report::last_month(today), Day::Mon);
     write(dir, "report.html", &html);
 }

@@ -11,13 +11,13 @@ use crossterm::event::{
 use ratatui::layout::Rect;
 use ratatui::widgets::ListState;
 
-use crate::config::Config;
-use crate::model::{Data, Day, Habit, TagError};
-use crate::reminders;
-use crate::stats;
-use crate::store::Store;
-use crate::theme::{ColorMode, Theme, ThemeName};
 use crate::ui::form::{Form, FormAction};
+use habit::config::Config;
+use habit::model::{Data, Day, Habit, TagError};
+use habit::reminders;
+use habit::stats;
+use habit::store::Store;
+use habit::theme::{ColorMode, Theme, ThemeName};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -35,6 +35,8 @@ pub enum Mode {
     Tag(TagEntry),
     /// The one-time explanation shown when reminders are first enabled.
     ReminderSetup,
+    /// Install or remove optional feature modules.
+    Modules,
 }
 
 /// The rename prompt, opened from the tags tab.
@@ -211,6 +213,8 @@ fn edit_input(input: &mut crate::ui::form::TextInput, key: KeyEvent) {
 pub enum ListRow {
     /// A section label that cannot be selected.
     Heading(&'static str),
+    /// A blank line that separates sections and cannot be selected.
+    Spacer,
     Archive,
     Habit(usize),
 }
@@ -268,10 +272,14 @@ pub struct App {
     pub flash: Option<Flash>,
     pub undo: Option<Data>,
     pub quit: bool,
+    /// Which optional modules this data file has.
+    pub modules: habit::modules::Modules,
+    pub modules_cursor: usize,
 }
 
 impl App {
     pub fn new(store: Store, data: Data, today: NaiveDate, config: &Config) -> Self {
+        let modules = habit::modules::Modules::detect(store.path());
         Self {
             store,
             data,
@@ -293,6 +301,8 @@ impl App {
             flash: None,
             undo: None,
             quit: false,
+            modules,
+            modules_cursor: 0,
         }
     }
 
@@ -397,6 +407,11 @@ impl App {
                 }
                 let mut rows: Vec<ListRow> = running.into_iter().map(ListRow::Habit).collect();
                 if !later.is_empty() {
+                    // Keep the habits that have not started yet clearly apart
+                    // from the ones running today.
+                    if !rows.is_empty() {
+                        rows.push(ListRow::Spacer);
+                    }
                     rows.push(ListRow::Heading("Starting later"));
                     rows.extend(later.into_iter().map(ListRow::Habit));
                 }
@@ -411,7 +426,7 @@ impl App {
             .into_iter()
             .filter_map(|row| match row {
                 ListRow::Habit(index) => Some(index),
-                ListRow::Heading(_) | ListRow::Archive => None,
+                ListRow::Heading(_) | ListRow::Spacer | ListRow::Archive => None,
             })
             .collect()
     }
@@ -470,13 +485,13 @@ impl App {
         };
         self.mode = Mode::Tag(TagEntry {
             from: tag.clone(),
-            input: crate::ui::form::TextInput::with_limit(crate::model::TAG_MAX_CHARS),
+            input: crate::ui::form::TextInput::with_limit(habit::model::TAG_MAX_CHARS),
             error: None,
         });
     }
 
     fn submit_tag_rename(&mut self, mut entry: TagEntry, text: &str) {
-        let Some(to) = crate::model::normalize_tag(text) else {
+        let Some(to) = habit::model::normalize_tag(text) else {
             entry.error = Some(TagError::Invalid.message().to_string());
             self.mode = Mode::Tag(entry);
             return;
@@ -711,6 +726,12 @@ impl App {
                 self.finish_reminder_setup(install);
                 Ok(())
             }
+            Mode::Modules => {
+                if self.modules_key(key) {
+                    self.mode = Mode::Modules;
+                }
+                Ok(())
+            }
         }
     }
 
@@ -798,10 +819,13 @@ impl App {
                 self.view_date = self.today;
                 self.flash_ok("back to today");
             }
-            KeyCode::Char('a') => self.mode = Mode::Form(Box::new(Form::new(self.today))),
+            KeyCode::Char('a') => {
+                self.mode = Mode::Form(Box::new(Form::new_with(self.today, self.modules.notify)))
+            }
             KeyCode::Char('e') => {
                 if let Some(habit) = self.selected_habit() {
-                    self.mode = Mode::Form(Box::new(Form::from_habit(habit)));
+                    self.mode =
+                        Mode::Form(Box::new(Form::from_habit_with(habit, self.modules.notify)));
                 }
             }
             KeyCode::Char('d') => self.toggle_archive_selected(),
@@ -817,6 +841,10 @@ impl App {
             KeyCode::Char('b') => self.show_footer = !self.show_footer,
             KeyCode::Char('T') => self.cycle_theme(),
             KeyCode::Char('m') => self.toggle_mode(),
+            KeyCode::Char('M') => {
+                self.modules_cursor = 0;
+                self.mode = Mode::Modules;
+            }
             KeyCode::Char('r') => self.reload(),
             _ => {}
         }
@@ -1051,14 +1079,71 @@ impl App {
 
     /// Called after a form save: keep installed units in step, or explain the
     /// one-time setup the first time a reminder is switched on.
+    /// Handle a key on the modules screen; `false` closes it.
+    fn modules_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => return false,
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.modules_cursor = self.modules_cursor.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.modules_cursor = (self.modules_cursor + 1).min(habit::modules::ALL.len() - 1);
+            }
+            KeyCode::Enter | KeyCode::Char(' ') => self.toggle_module(),
+            _ => {}
+        }
+        true
+    }
+
+    fn toggle_module(&mut self) {
+        let module = &habit::modules::ALL[self.modules_cursor];
+        let name = module.label.to_lowercase();
+        if self.modules.installed(module.name) {
+            match habit::modules::remove_with_jobs(self.store.path(), module.name) {
+                Ok((removed, jobs)) => {
+                    let mut text = if removed {
+                        format!("removed the {name} module")
+                    } else {
+                        format!("the {name} module was not installed")
+                    };
+                    if jobs > 0 {
+                        text.push_str(&format!(
+                            " and {}",
+                            habit::format::plural(jobs as u32, "scheduled job")
+                        ));
+                    }
+                    self.flash_ok(text);
+                }
+                Err(error) => self.flash_err(format!("{error:#}")),
+            }
+        } else {
+            match habit::modules::install(self.store.path(), module.name) {
+                Ok(path) => self.flash_ok(format!(
+                    "installed {name} · {}",
+                    habit::format::pretty_path(&path)
+                )),
+                Err(error) => self.flash_err(format!("{error:#}")),
+            }
+        }
+        self.modules = habit::modules::Modules::detect(self.store.path());
+    }
+
     fn after_reminder_change(&mut self, newly_enabled: bool) {
+        if !self.modules.notify {
+            if newly_enabled {
+                self.flash_warning(
+                    "reminder saved · `habit modules install notify` turns notifications on".into(),
+                );
+            }
+            return;
+        }
         let installed =
             reminders::any_installed(reminders::platform(), &reminders::REMINDER_PREFIXES);
         if installed {
             match self.sync_reminders() {
                 Ok(count) => self.flash_ok(format!(
                     "reminders scheduled · {}",
-                    crate::format::plural(count as u32, "time")
+                    habit::format::plural(count as u32, "time")
                 )),
                 Err(error) => {
                     self.flash_warning(format!("reminder saved, but scheduling failed: {error:#}"))
@@ -1086,7 +1171,7 @@ impl App {
                 Ok(0) => self.flash_warning("no reminder times to schedule".into()),
                 Ok(count) => self.flash_ok(format!(
                     "reminders scheduled · {}",
-                    crate::format::plural(count as u32, "time")
+                    habit::format::plural(count as u32, "time")
                 )),
                 Err(error) => self.flash_err(format!("could not schedule: {error:#}")),
             }
@@ -1221,6 +1306,7 @@ impl App {
         match self.store.load() {
             Ok(data) => {
                 self.data = data;
+                self.modules = habit::modules::Modules::detect(self.store.path());
                 self.clamp_cursor();
                 self.flash_ok("reloaded from disk");
             }
@@ -1328,7 +1414,7 @@ pub fn parse_date(text: &str) -> Option<NaiveDate> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::Schedule;
+    use habit::model::Schedule;
 
     fn date(text: &str) -> NaiveDate {
         NaiveDate::parse_from_str(text, "%Y-%m-%d").unwrap()
@@ -1461,6 +1547,7 @@ mod tests {
             app.view_rows(),
             vec![
                 ListRow::Habit(0),
+                ListRow::Spacer,
                 ListRow::Heading("Starting later"),
                 ListRow::Habit(1),
             ]
@@ -1539,7 +1626,7 @@ mod tests {
         app.handle_mouse(MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column: 2,
-            row: 6, // the "Starting later" row
+            row: 6, // the spacer above "Starting later"
             modifiers: KeyModifiers::NONE,
         });
         assert_eq!(app.cursor, 0);
@@ -1547,7 +1634,15 @@ mod tests {
         app.handle_mouse(MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column: 2,
-            row: 7,
+            row: 7, // the heading itself
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(app.cursor, 0);
+
+        app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 2,
+            row: 8,
             modifiers: KeyModifiers::NONE,
         });
         assert_eq!(app.cursor, 1);
@@ -1565,6 +1660,31 @@ mod tests {
             vec![ListRow::Heading("Starting later"), ListRow::Habit(1)]
         );
         assert_eq!(app.visible_indices(), vec![1]);
+    }
+
+    #[test]
+    fn the_modules_key_opens_and_closes_the_screen() {
+        let mut app = app();
+        press(&mut app, KeyCode::Char('M'));
+        assert!(matches!(app.mode, Mode::Modules));
+        press(&mut app, KeyCode::Down);
+        assert_eq!(app.modules_cursor, 1);
+        press(&mut app, KeyCode::Esc);
+        assert!(matches!(app.mode, Mode::Normal));
+        assert!(!app.quit);
+    }
+
+    #[test]
+    fn editing_without_the_notify_module_keeps_a_saved_reminder() {
+        let mut app = app();
+        app.modules.notify = false;
+        app.data.habits[0].reminder = Some(chrono::NaiveTime::from_hms_opt(9, 0, 0).unwrap());
+        press(&mut app, KeyCode::Char('e'));
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(
+            app.data.habits[0].reminder,
+            Some(chrono::NaiveTime::from_hms_opt(9, 0, 0).unwrap())
+        );
     }
 
     #[test]

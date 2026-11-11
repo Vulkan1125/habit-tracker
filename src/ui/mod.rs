@@ -15,8 +15,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
 
 use crate::app::{App, Mode, Tab};
-use crate::format::{truncate, width};
-use crate::theme::Theme;
+use habit::format::{pad_right, truncate, width};
+use habit::theme::Theme;
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
@@ -57,6 +57,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Mode::Note(entry) => note_overlay(frame, area, &theme, entry),
         Mode::Tag(entry) => tag_overlay(frame, area, &theme, entry),
         Mode::ReminderSetup => reminder_setup_overlay(frame, area, &theme),
+        Mode::Modules => modules_overlay(frame, area, &theme, app),
     }
 }
 
@@ -152,6 +153,7 @@ fn hint(app: &App, max_width: usize) -> String {
         Mode::Note(_) => "tab date/note · ↑↓ day · enter save · esc cancel".to_string(),
         Mode::Tag(_) => "enter rename · esc cancel · an existing name merges".to_string(),
         Mode::ReminderSetup => "y install now · n later".to_string(),
+        Mode::Modules => "enter install / remove · esc close".to_string(),
         Mode::Normal if app.filtering => {
             "type to filter · #tag for tags · enter keep · esc clear".to_string()
         }
@@ -242,6 +244,93 @@ fn reminder_setup_overlay(frame: &mut Frame, area: Rect, theme: &Theme) {
             Span::raw(" later (saved, but silent)"),
         ]),
     ];
+    frame.render_widget(Paragraph::new(lines).style(theme.base()), inner);
+}
+
+fn modules_overlay(frame: &mut Frame, area: Rect, theme: &Theme, app: &App) {
+    use habit::format::pretty_path;
+    use habit::modules;
+
+    let width = area.width.saturating_sub(4).clamp(46, 74);
+    let height = (modules::ALL.len() as u16 + 7).min(area.height);
+    let popup = Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+    frame.render_widget(Clear, popup);
+    let block = Block::bordered()
+        .title(" Modules ")
+        .border_style(Style::default().fg(theme.accent))
+        .style(theme.base());
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    let room = inner.width as usize;
+    let mut lines = vec![
+        Line::from(Span::styled(
+            truncate("Optional features, kept out of the core app.", room),
+            Style::default().fg(theme.dim),
+        )),
+        Line::raw(""),
+    ];
+    for (index, module) in modules::ALL.iter().enumerate() {
+        let installed = app.modules.installed(module.name);
+        let status = if installed {
+            "installed"
+        } else if modules::source(module.name).is_some() {
+            "not installed"
+        } else {
+            "unavailable"
+        };
+        let marker = if index == app.modules_cursor {
+            Span::styled("▸ ", Style::default().fg(theme.accent))
+        } else {
+            Span::raw("  ")
+        };
+        let status_style = if installed {
+            Style::default().fg(theme.done)
+        } else {
+            Style::default().fg(theme.dim)
+        };
+        lines.push(Line::from(vec![
+            marker,
+            Span::styled(
+                pad_right(module.label, 14),
+                Style::default()
+                    .fg(if index == app.modules_cursor {
+                        theme.fg
+                    } else {
+                        theme.dim
+                    })
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(pad_right(status, 14), status_style),
+            Span::styled(
+                truncate(module.description, room.saturating_sub(30)),
+                Style::default().fg(theme.dim),
+            ),
+        ]));
+    }
+    lines.push(Line::raw(""));
+    let directory = modules::dir(app.store.path());
+    lines.push(Line::from(Span::styled(
+        truncate(&format!("installed in {}", pretty_path(&directory)), room),
+        Style::default().fg(theme.dim),
+    )));
+    lines.push(Line::from(vec![
+        Span::styled(
+            "enter",
+            Style::default().fg(theme.warn).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" install / remove    "),
+        Span::styled(
+            "esc",
+            Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" close"),
+    ]));
     frame.render_widget(Paragraph::new(lines).style(theme.base()), inner);
 }
 
@@ -428,10 +517,10 @@ fn confirm_overlay(frame: &mut Frame, area: Rect, theme: &Theme, confirm: &crate
 mod tests {
     use super::*;
     use crate::app::Tab;
-    use crate::config::Config;
-    use crate::model::{Data, Schedule};
-    use crate::store::Store;
     use chrono::{NaiveDate, NaiveTime};
+    use habit::config::Config;
+    use habit::model::{Data, Schedule};
+    use habit::store::Store;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
@@ -508,7 +597,7 @@ mod tests {
 
     #[test]
     fn selected_row_is_one_colour_in_every_theme() {
-        use crate::theme::{ColorMode, ThemeName};
+        use habit::theme::{ColorMode, ThemeName};
 
         for name in ThemeName::ALL {
             for mode in [ColorMode::Dark, ColorMode::Light] {
@@ -743,6 +832,27 @@ mod tests {
     }
 
     #[test]
+    fn without_the_notify_module_the_form_hides_the_remind_row() {
+        let mut app = app_with("Gym");
+        app.mode = Mode::Form(Box::new(form::Form::new_with(date(), false)));
+        let screen = render(&mut app, 90, 30);
+        assert!(screen.contains("Description"), "{screen}");
+        assert!(!screen.contains("Remind"), "{screen}");
+    }
+
+    #[test]
+    fn the_modules_overlay_lists_every_module() {
+        let mut app = app_with("Gym");
+        app.modules.notify = true;
+        app.mode = Mode::Modules;
+        let screen = render(&mut app, 90, 30);
+        assert!(screen.contains("Modules"), "{screen}");
+        assert!(screen.contains("Notifications"), "{screen}");
+        assert!(screen.contains("installed"), "{screen}");
+        assert!(screen.contains("Reports"), "{screen}");
+    }
+
+    #[test]
     fn form_overlay_renders() {
         let mut app = app_with("Gym");
         app.mode = Mode::Form(Box::new(form::Form::new(date())));
@@ -767,6 +877,7 @@ mod tests {
     #[test]
     fn a_reminder_time_is_shown_in_the_details() {
         let mut app = app_with("Gym");
+        app.modules.notify = true;
         app.data.habits[0].reminder = Some(NaiveTime::from_hms_opt(9, 0, 0).unwrap());
         let screen = render(&mut app, 90, 30);
         assert!(screen.contains("reminder 09:00"), "{screen}");

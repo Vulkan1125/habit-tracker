@@ -8,7 +8,8 @@ Every feature keeps the two rules that make the project what it is: **one plain 
 **no daemon, account or network**. The Archive tab, the **Starting later** heading and native
 reminders shipped in 0.6.0. 0.7.0 made reminders per-habit with one OS job per time and added
 monthly HTML reports; the reminders still hand each run to launchd/systemd rather than living
-inside the app.
+inside the app. 0.8.0 moved those two larger features into installable companion binaries, so the
+core stays small and the features are opt-in.
 
 ## How the pieces fit together
 
@@ -256,17 +257,20 @@ beyond palette tables.
 - A quota bar chart and richer multi-tag views.
 - Optional reminders/notifications — **shipped in 0.6.0** as `habit remind` plus `habit schedule
   install`, which writes a launchd agent or systemd user timer. 0.7.0 added per-habit reminder
-  times, one job per distinct time, and a first-run setup prompt. Still no daemon and still
-  opt-in, exactly as sketched here.
+  times, one job per distinct time, and a first-run setup prompt. 0.8.0 made the whole feature an
+  installable module (`habit modules install notify`). Still no daemon and still opt-in, exactly
+  as sketched here.
 - A monthly HTML report — **shipped in 0.7.0** as `habit report` plus `habit schedule reports
-  install`. One self-contained page per month, on demand or on a chosen day.
+  install`; 0.8.0 moved it into the installable reports module. One self-contained page per month,
+  on demand or on a chosen day.
 - Import/export helpers (CSV, and reading a previous `data.json`).
 - Windows CI.
 
 ## Non-goals
 
 - Accounts, sync, cloud storage, telemetry.
-- A plugin system or scripting language.
+- A general plugin system or scripting language. The two modules are curated companion binaries
+  shipped with the app, not a public extension API.
 - A web UI or a server.
 - Sub-second timers or background work of any kind.
 

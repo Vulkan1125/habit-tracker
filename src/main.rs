@@ -4,14 +4,6 @@
 
 mod app;
 mod cli;
-mod config;
-mod format;
-mod model;
-mod reminders;
-mod report;
-mod stats;
-mod store;
-mod theme;
 mod ui;
 
 use std::io;
@@ -26,8 +18,8 @@ use crossterm::execute;
 
 use crate::app::App;
 use crate::cli::Cli;
-use crate::config::Config;
-use crate::store::Store;
+use habit::config::Config;
+use habit::store::Store;
 
 fn main() -> ExitCode {
     match run() {
@@ -45,23 +37,38 @@ fn run() -> Result<()> {
     let today = cli.today.unwrap_or_else(|| Local::now().date_naive());
     let (config, warning) = Config::load();
 
+    let mut data = store.load()?;
+    // Upgrading must not switch reminders or reports off for existing data.
+    let installed = habit::modules::migrate(store.path(), &data);
+
     match cli.command {
         Some(command) => {
             if let Some(warning) = warning {
                 eprintln!("habit: {warning}");
             }
-            let mut data = store.load()?;
+            for note in &installed {
+                eprintln!("habit: {note}");
+            }
             cli::run(command, &store, &mut data, today, &config)
         }
-        None => run_tui(store, today, &config, warning),
+        None => run_tui(store, data, today, &config, warning, installed),
     }
 }
 
-fn run_tui(store: Store, today: NaiveDate, config: &Config, warning: Option<String>) -> Result<()> {
-    let data = store.load()?;
+fn run_tui(
+    store: Store,
+    data: habit::model::Data,
+    today: NaiveDate,
+    config: &Config,
+    warning: Option<String>,
+    installed: Vec<String>,
+) -> Result<()> {
     let mut app = App::new(store, data, today, config);
     if let Some(warning) = warning {
         app.flash_warning(warning);
+    }
+    for note in installed {
+        app.flash_warning(note);
     }
 
     let mut terminal = ratatui::try_init()?;

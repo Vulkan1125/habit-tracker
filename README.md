@@ -2,7 +2,8 @@
 
 **A calm habit tracker for the terminal.** Streaks, weekly quotas, cheat days, tags, descriptions,
 dated notes, per-habit reminders, monthly HTML reports and a heatmap — plus a plain JSON file you
-can read, diff and `grep`. One 2 MB Rust binary with no daemon, no account and no network access.
+can read, diff and `grep`. A small Rust core, with reminders and reports installed only when you
+want them, and no daemon, no account and no network access.
 
 [![CI](https://github.com/Vulkan1125/habit-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/Vulkan1125/habit-tracker/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -17,6 +18,31 @@ can read, diff and `grep`. One 2 MB Rust binary with no daemon, no account and n
 Run `habit` and you get a full-screen TUI. Run `habit done gym` and you get a scriptable CLI. Both
 read and write the same file, so terminal widgets, cron jobs and shell aliases all see the same
 state. The TUI can now act on any past day, so backfilling no longer needs a second tool.
+
+### Optional modules — install what you need
+
+The core app tracks habits. Two larger features ship as companion binaries and are installed only
+when you ask for them:
+
+```sh
+habit modules list              # installed, not installed, or unavailable in this build
+habit modules install notify    # reminder times and desktop notifications
+habit modules install report    # monthly HTML pages
+habit modules remove report     # uninstall it and stop its scheduled job
+```
+
+`habit modules` on its own is the same as `list`. In the TUI, `M` opens the modules screen; `enter`
+or `space` installs or removes the highlighted module. Modules live in `<data dir>/modules`, beside
+the data file, so each data file carries its own feature set. Installing copies the binary that
+shipped with `habit` — a release archive, Homebrew cellar or `cargo install` — and never uses the
+network.
+
+Without the notifications module there is no **Remind** field, no reminder line in the detail pane
+and no `habit remind`; without the reports module there is no `habit report`. The commands name the
+exact module to install when you reach for something that is missing. Saved reminder times are kept
+when a module is removed, so reinstalling it brings the feature back.
+
+![The modules screen: notifications installed, reports ready to install](docs/screenshots/modules.png)
 
 ### Schedules that match real life
 
@@ -235,8 +261,9 @@ Gym · 4×/week · since 2026-09-14
 
 ### Per-habit reminders, without a daemon
 
-Reminders are **opt-in per habit**: nothing is scheduled until a habit gets a time. Set one in the
-add/edit dialog's **Remind** field, or from the shell:
+The notifications module (`habit modules install notify`) adds **opt-in per-habit reminders**:
+nothing is scheduled until a habit gets a time. Set one in the add/edit dialog's **Remind** field,
+or from the shell:
 
 ```sh
 habit add "Morning run" --remind 06:30
@@ -282,8 +309,9 @@ it once, and the rest arrive quietly.
 
 ### Monthly HTML reports
 
-`habit report` writes one self-contained page per month — inline CSS, no scripts, no fonts to
-download and no network — to `<data dir>/reports/habit-YYYY-MM.html`:
+The reports module (`habit modules install report`) writes one self-contained page per month —
+inline CSS, no scripts, no fonts to download and no network — to
+`<data dir>/reports/habit-YYYY-MM.html`:
 
 ```sh
 habit report                    # this month, on demand
@@ -313,7 +341,8 @@ notification carrying its path. The day must be 1–28 so every month has it; th
 ### Small on purpose
 
 No database, no sync, no telemetry, no async runtime, no plugin API. Nine direct dependencies, all
-mainstream. `cargo build --release` produces a single ~2 MB binary.
+mainstream. The core `habit` binary stays around 2 MB; the optional modules add a little more only
+when you install them.
 
 ## Installation
 
@@ -329,36 +358,47 @@ Linux, one line:
 curl -fsSL https://github.com/Vulkan1125/habit-tracker/releases/latest/download/install.sh | sh
 ```
 
-The installer checks the download against the release's `SHA256SUMS`, then installs the native
-package on Debian/Ubuntu (`apt-get`), Fedora/RHEL (`dnf`/`yum`) and Arch (`pacman`). Everywhere
-else — or with `--static` — it unpacks the static musl binary into `~/.local/bin`, which needs no
-root. Useful flags:
+The installer checks the download against the release's `SHA256SUMS` and installs all three
+binaries — `habit`, `habit-notify` and `habit-report` — so `habit modules install …` works offline.
+On Debian/Ubuntu (`apt-get`), Fedora/RHEL (`dnf`/`yum`) and Arch (`pacman`) it uses the native
+package; everywhere else, including macOS, it unpacks the prebuilt binaries into `~/.local/bin`
+without needing root.
+
+If no prebuilt build exists for your platform (Linux arm64, for example), it compiles from source.
+Rust is detected first: when `cargo` is missing the installer offers to set it up with
+[rustup](https://rustup.rs) before building. At the end it asks whether to add the install
+directory to your shell's `PATH`; say yes and it writes the line to `.zshrc`, `.bashrc`, `.profile`
+or the fish config, and `--no-path` skips the question.
+
+Useful flags:
 
 ```sh
 installer=https://github.com/Vulkan1125/habit-tracker/releases/latest/download/install.sh
 
-curl -fsSL "$installer" | sh                  # detect the distro and install
-curl -fsSL "$installer" | sh -s -- --static   # portable binary in ~/.local/bin
-curl -fsSL "$installer" | sh -s -- --dry-run  # download and verify, install nothing
+curl -fsSL "$installer" | sh                    # detect the distro and install
+curl -fsSL "$installer" | sh -s -- --static     # portable binary in ~/.local/bin
+curl -fsSL "$installer" | sh -s -- --from-source # compile, installing Rust if needed
+curl -fsSL "$installer" | sh -s -- --dry-run    # download and verify, install nothing
 ```
 
 `--version TAG` pins a release, `--package` forces the distro package, `--static` forces the
-portable binary, `--dry-run` downloads and verifies without installing, and `--yes` skips the
-confirmation. Linux arm64 has no prebuilt binary yet; `cargo install` builds from source.
+portable binary, `--from-source` compiles from source, `--no-path` skips the `PATH` question,
+`--dry-run` downloads and verifies without installing, and `--yes` skips confirmations.
 
-Prebuilt packages are attached to each [GitHub release](https://github.com/Vulkan1125/habit-tracker/releases/latest):
+Prebuilt packages are attached to each [GitHub release](https://github.com/Vulkan1125/habit-tracker/releases/latest).
+Every archive and package contains all three binaries:
 
 | Platform | Asset | Install |
 | --- | --- | --- |
 | Debian / Ubuntu | `habit_X.Y.Z_amd64.deb` | `sudo dpkg -i habit_X.Y.Z_amd64.deb` |
 | Fedora / RHEL | `habit-X.Y.Z-1.x86_64.rpm` | `sudo dnf install ./habit-X.Y.Z-1.x86_64.rpm` |
 | Arch Linux | `habit-X.Y.Z-1-x86_64.pkg.tar.zst` | `sudo pacman -U habit-X.Y.Z-1-x86_64.pkg.tar.zst` |
-| macOS (universal) | `habit-X.Y.Z-macos-universal.tar.gz` | `tar -xzf habit-X.Y.Z-macos-universal.tar.gz && sudo install -m 755 habit-X.Y.Z-macos-universal/habit /usr/local/bin/` |
-| Linux (static) | `habit-X.Y.Z-x86_64-linux-musl.tar.gz` | `tar -xzf habit-X.Y.Z-x86_64-linux-musl.tar.gz && install -m 755 habit-X.Y.Z-x86_64-linux-musl/habit ~/.local/bin/` |
+| macOS (universal) | `habit-X.Y.Z-macos-universal.tar.gz` | `tar -xzf habit-X.Y.Z-macos-universal.tar.gz && sudo install -m 755 habit-X.Y.Z-macos-universal/habit* /usr/local/bin/` |
+| Linux (static) | `habit-X.Y.Z-x86_64-linux-musl.tar.gz` | `tar -xzf habit-X.Y.Z-x86_64-linux-musl.tar.gz && install -m 755 habit-X.Y.Z-x86_64-linux-musl/habit* ~/.local/bin/` |
 
 Every release also carries a `SHA256SUMS` file. The macOS binary is universal (Apple Silicon and
 Intel) but unsigned; if Gatekeeper quarantines it, remove the attribute with
-`xattr -d com.apple.quarantine habit`.
+`xattr -d com.apple.quarantine habit*`.
 
 The Homebrew formula lives in [Vulkan1125/homebrew-tap](https://github.com/Vulkan1125/homebrew-tap)
 and `brew upgrade habit` follows new releases. `install.sh` lives in this repository and is also
@@ -376,6 +416,9 @@ cargo install --path .
 cargo install --git https://github.com/Vulkan1125/habit-tracker
 ```
 
+`cargo install` puts all three binaries on `PATH`; `habit` looks for the module binaries beside
+itself, so `habit modules install notify` works with no download.
+
 Updating an existing install (an older `habit` earlier on `PATH` will otherwise keep running):
 
 ```sh
@@ -386,7 +429,8 @@ Or build and copy the binary yourself:
 
 ```sh
 cargo build --release
-install -m 755 target/release/habit ~/.local/bin/
+install -m 755 target/release/habit target/release/habit-notify \
+    target/release/habit-report ~/.local/bin/
 ```
 
 Requires Rust 1.88 or newer (the MSRV is set in `Cargo.toml`; ratatui requires it too). Tested on
@@ -442,6 +486,7 @@ Nothing else to configure. The data file is created on the first change.
 | `r` | reload the data file from disk |
 | `T` | next colour theme (saved to config) |
 | `m` | switch dark / light mode (saved) |
+| `M` | install or remove optional modules |
 | `?` | help overlay |
 | `q`, `esc` | quit — `esc` first clears a filter, then backs out of a tag view or another tab |
 | `y` / `n` | in the notification setup prompt: install the schedule now / keep it silent for now |
@@ -449,7 +494,8 @@ Nothing else to configure. The data file is created on the first change.
 In the add/edit dialog: `tab` / `shift-tab` moves between fields, `←→` changes the schedule kind,
 `space` toggles a weekday, `enter` saves, `esc` cancels. The fields are name, schedule, weekday
 selection, weekly quota, start date, end date, reminder time, tags and description; leave
-**Remind** empty to keep notifications off.
+**Remind** empty to keep notifications off. Without the notifications module the **Remind** row is
+not shown at all.
 
 ![The add/edit dialog, with start, end and reminder fields](docs/screenshots/form.png)
 
@@ -494,6 +540,9 @@ Global flags, usable before or after the subcommand:
 | `habit schedule reports install` | `--day 1-28` (default 1), `--at HH:MM`, `--dry-run` | schedule the monthly report |
 | `habit schedule reports remove` | `--dry-run` | stop and delete the monthly report job |
 | `habit schedule reports status` | | show whether the report job is installed and loaded |
+| `habit modules` | | list every module and whether it is installed |
+| `habit modules install <NAME>` | | install `notify` or `report` |
+| `habit modules remove <NAME>` | | remove a module and its scheduled jobs, keeping habit data |
 | `habit path` | | print the data file path |
 | `habit config` | | print effective config, data path, theme and mode |
 | `habit themes` | | list the palettes |
@@ -682,7 +731,7 @@ A few decisions worth knowing:
 ## Development
 
 ```sh
-cargo test                                  # 192 tests
+cargo test                                  # 206 tests
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 cargo build --release
@@ -702,9 +751,10 @@ several widths and in the overlays.
 `0.2.0` shipped the six features planned for it — start/end dates, monthly cheat days, notes, tags
 and filtering, a detail-pane trend graph and the visual/theming pass. Later releases added dated
 notes, the Tags tab, tag rename/merge, the Archive tab and opt-in native reminders; `0.7.0` added
-per-habit reminder times with a first-run setup prompt and monthly HTML reports. The trend line
-itself went away in `0.3.0`, leaving the adaptive heatmap. **[ROADMAP.md](ROADMAP.md)** keeps the
-original design notes and decisions.
+per-habit reminder times with a first-run setup prompt and monthly HTML reports; `0.8.0` moved
+reminders and reports into optional modules you install with `habit modules`. The trend line itself
+went away in `0.3.0`, leaving the adaptive heatmap. **[ROADMAP.md](ROADMAP.md)** keeps the original
+design notes and decisions.
 
 Ideas still on the table, roughly in order:
 

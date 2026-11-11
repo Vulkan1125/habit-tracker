@@ -11,10 +11,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, List, ListItem, Paragraph};
 
 use crate::app::{App, ListRow, Tab};
-use crate::format::{pad_right, width};
-use crate::model::Habit;
-use crate::stats::{self, Status};
-use crate::theme::Theme;
+use habit::format::{pad_right, width};
+use habit::model::Habit;
+use habit::stats::{self, Status};
+use habit::theme::Theme;
 
 const DOTS: u32 = 7;
 const DOTS_WIDTH: usize = DOTS as usize;
@@ -125,7 +125,7 @@ fn draw_tabs(frame: &mut Frame, area: Rect, app: &mut App) {
     if !filter.is_empty() {
         let used = (x - area.x) as usize;
         let room = (area.width as usize).saturating_sub(used);
-        let filter = crate::format::truncate(&filter, room);
+        let filter = habit::format::truncate(&filter, room);
         let padding = room.saturating_sub(width(&filter));
         spans.push(Span::raw(" ".repeat(padding)));
         spans.push(Span::styled(filter, Style::default().fg(theme.warn)));
@@ -166,6 +166,7 @@ fn habit_list(frame: &mut Frame, area: Rect, app: &mut App) {
                     format!(" {label}"),
                     Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
                 )))),
+                ListRow::Spacer => items.push(ListItem::new(Line::from(""))),
                 ListRow::Archive => items.push(ListItem::new(Line::from(Span::styled(
                     " Archive",
                     Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),

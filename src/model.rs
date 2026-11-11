@@ -626,7 +626,7 @@ impl Data {
         }
     }
 
-    #[cfg(test)]
+    /// Shorthand for a habit with no end date, tags or description.
     pub fn add_habit(
         &mut self,
         name: &str,

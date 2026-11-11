@@ -7,10 +7,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 
 use crate::app::App;
-use crate::format::{pad_right, truncate};
-use crate::model::Habit;
-use crate::stats::{self, Status};
-use crate::theme::Theme;
+use habit::format::{pad_right, truncate};
+use habit::model::Habit;
+use habit::stats::{self, Status};
+use habit::theme::Theme;
 
 pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     let theme = app.theme;
@@ -69,7 +69,9 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         format!(" · {}", habit.window_label()),
         Style::default().fg(theme.dim),
     ));
-    if let Some(reminder) = habit.reminder {
+    if app.modules.notify
+        && let Some(reminder) = habit.reminder
+    {
         subtitle.push(Span::styled(
             format!(" · reminder {}", reminder.format("%H:%M")),
             Style::default().fg(theme.warn),
@@ -155,7 +157,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     let cheats = app.data.cheats.used_in_month(&habit.id, app.today);
     let month = app.today.format("%b").to_string();
     let mut summary = vec![Span::styled(
-        crate::format::plural(total, "check-in"),
+        habit::format::plural(total, "check-in"),
         Style::default().fg(theme.dim),
     )];
     if cheats > 0 {
@@ -256,7 +258,7 @@ fn heatmap_lines(
     // `grid` rows are offsets from the week start, so row 0 is the first
     // displayed weekday whatever the configured week start is.
     for (offset, cells) in grid.iter().enumerate() {
-        let label = crate::model::Day::from_index(app.week_start.index() + offset);
+        let label = habit::model::Day::from_index(app.week_start.index() + offset);
         let mut spans = vec![Span::styled(
             format!("{:<4}", label.short()),
             Style::default().fg(theme.dim),

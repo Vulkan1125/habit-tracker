@@ -39,10 +39,12 @@ jobs:
           version="${REF#v}"
           dir="habit-${version}-x86_64-linux-musl"
           mkdir -p "dist/${dir}"
-          cp target/x86_64-unknown-linux-musl/release/habit "dist/${dir}/habit"
+          for bin in habit habit-notify habit-report; do
+            cp "target/x86_64-unknown-linux-musl/release/${bin}" "dist/${dir}/${bin}"
+            file "dist/${dir}/${bin}"
+          done
           cp README.md LICENSE "dist/${dir}/"
           tar -C dist -czf "dist/${dir}.tar.gz" "${dir}"
-          file "dist/${dir}/habit"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -68,12 +70,14 @@ jobs:
           version="${REF#v}"
           dir="habit-${version}-macos-universal"
           mkdir -p "dist/${dir}"
-          lipo -create -output "dist/${dir}/habit" \
-            target/aarch64-apple-darwin/release/habit \
-            target/x86_64-apple-darwin/release/habit
+          for bin in habit habit-notify habit-report; do
+            lipo -create -output "dist/${dir}/${bin}" \
+              "target/aarch64-apple-darwin/release/${bin}" \
+              "target/x86_64-apple-darwin/release/${bin}"
+            lipo -info "dist/${dir}/${bin}"
+          done
           cp README.md LICENSE "dist/${dir}/"
           tar -C dist -czf "dist/${dir}.tar.gz" "${dir}"
-          lipo -info "dist/${dir}/habit"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -99,6 +103,8 @@ jobs:
           rm -rf "$root"
           mkdir -p "$root/DEBIAN" "$root/usr/bin" "$root/usr/share/doc/habit"
           cp linux-binary/extracted/habit-*/habit "$root/usr/bin/habit"
+          cp linux-binary/extracted/habit-*/habit-notify "$root/usr/bin/habit-notify"
+          cp linux-binary/extracted/habit-*/habit-report "$root/usr/bin/habit-report"
           cp linux-binary/extracted/habit-*/README.md "$root/usr/share/doc/habit/README.md"
           cp linux-binary/extracted/habit-*/LICENSE "$root/usr/share/doc/habit/LICENSE"
           cat > "$root/DEBIAN/control" <<EOF
@@ -143,6 +149,8 @@ jobs:
           tar -xzf linux-binary/*.tar.gz -C linux-binary/extracted
           mkdir -p rpmbuild/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS} dist
           cp linux-binary/extracted/habit-*/habit rpmbuild/SOURCES/habit
+          cp linux-binary/extracted/habit-*/habit-notify rpmbuild/SOURCES/habit-notify
+          cp linux-binary/extracted/habit-*/habit-report rpmbuild/SOURCES/habit-report
           cp linux-binary/extracted/habit-*/LICENSE rpmbuild/SOURCES/LICENSE
           cp linux-binary/extracted/habit-*/README.md rpmbuild/SOURCES/README.md
           cat > rpmbuild/SPECS/habit.spec <<EOF
@@ -155,6 +163,8 @@ jobs:
           Source0:        habit
           Source1:        LICENSE
           Source2:        README.md
+          Source3:        habit-notify
+          Source4:        habit-report
           BuildArch:      x86_64
           AutoReqProv:    no
 
@@ -168,11 +178,15 @@ jobs:
 
           %install
           install -Dm755 %{SOURCE0} %{buildroot}%{_bindir}/habit
+          install -Dm755 %{SOURCE3} %{buildroot}%{_bindir}/habit-notify
+          install -Dm755 %{SOURCE4} %{buildroot}%{_bindir}/habit-report
           install -Dm644 %{SOURCE1} %{buildroot}%{_datadir}/licenses/habit/LICENSE
           install -Dm644 %{SOURCE2} %{buildroot}%{_docdir}/habit/README.md
 
           %files
           %{_bindir}/habit
+          %{_bindir}/habit-notify
+          %{_bindir}/habit-report
           %license %{_datadir}/licenses/habit/LICENSE
           %doc %{_docdir}/habit/README.md
 
@@ -211,6 +225,8 @@ jobs:
           rm -rf "$root"
           mkdir -p "$root/usr/bin" "$root/usr/share/licenses/habit" "$root/usr/share/doc/habit"
           cp linux-binary/extracted/habit-*/habit "$root/usr/bin/habit"
+          cp linux-binary/extracted/habit-*/habit-notify "$root/usr/bin/habit-notify"
+          cp linux-binary/extracted/habit-*/habit-report "$root/usr/bin/habit-report"
           cp linux-binary/extracted/habit-*/LICENSE "$root/usr/share/licenses/habit/LICENSE"
           cp linux-binary/extracted/habit-*/README.md "$root/usr/share/doc/habit/README.md"
           size=$(du -sb "$root" | awk '{print $1}')

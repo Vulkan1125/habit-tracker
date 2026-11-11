@@ -6,8 +6,8 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
 
-use crate::format::pad_right;
-use crate::theme::Theme;
+use habit::format::pad_right;
+use habit::theme::Theme;
 
 const KEYS: &[(&str, &str)] = &[
     ("space", "check off / undo the selected day"),
@@ -27,6 +27,7 @@ const KEYS: &[(&str, &str)] = &[
     ("/", "filter by text, tag or #tag"),
     ("T", "next colour theme"),
     ("m", "dark / light mode"),
+    ("M", "install or remove modules"),
     ("r", "reload the file from disk"),
     ("?", "this help"),
     ("esc", "back out / quit"),

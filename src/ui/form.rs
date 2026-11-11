@@ -11,9 +11,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
 
 use crate::app::parse_date;
-use crate::format::{pad_right, truncate};
-use crate::model::{ALL_DAYS, Day, Habit, Schedule, normalize_tag};
-use crate::theme::Theme;
+use habit::format::{pad_right, truncate};
+use habit::model::{ALL_DAYS, Day, Habit, Schedule, normalize_tag};
+use habit::theme::Theme;
 
 #[derive(Debug, Clone)]
 pub struct TextInput {
@@ -119,14 +119,17 @@ pub enum Field {
 }
 
 impl Field {
-    fn next(self) -> Field {
+    /// The next field. Without the notifications module the reminder row is
+    /// not part of the dialog at all.
+    fn next(self, reminders: bool) -> Field {
         match self {
             Field::Name => Field::Kind,
             Field::Kind => Field::Days,
             Field::Days => Field::Weekly,
             Field::Weekly => Field::Start,
             Field::Start => Field::Ends,
-            Field::Ends => Field::Reminder,
+            Field::Ends if reminders => Field::Reminder,
+            Field::Ends => Field::Tags,
             Field::Reminder => Field::Tags,
             Field::Tags => Field::Note,
             Field::Note => Field::Save,
@@ -134,7 +137,7 @@ impl Field {
         }
     }
 
-    fn previous(self) -> Field {
+    fn previous(self, reminders: bool) -> Field {
         match self {
             Field::Name => Field::Save,
             Field::Kind => Field::Name,
@@ -143,7 +146,8 @@ impl Field {
             Field::Start => Field::Weekly,
             Field::Ends => Field::Start,
             Field::Reminder => Field::Ends,
-            Field::Tags => Field::Reminder,
+            Field::Tags if reminders => Field::Reminder,
+            Field::Tags => Field::Ends,
             Field::Note => Field::Tags,
             Field::Save => Field::Note,
         }
@@ -203,10 +207,17 @@ pub struct Form {
     focus: Field,
     day_cursor: usize,
     error: Option<String>,
+    /// Whether the Remind row exists (the notifications module is installed).
+    reminders: bool,
 }
 
 impl Form {
+    #[cfg(test)]
     pub fn new(today: NaiveDate) -> Self {
+        Self::new_with(today, true)
+    }
+
+    pub fn new_with(today: NaiveDate, reminders: bool) -> Self {
         let mut weekly = TextInput::with_limit(2);
         weekly.set("3");
         let mut start = TextInput::with_limit(10);
@@ -225,11 +236,17 @@ impl Form {
             focus: Field::Name,
             day_cursor: 0,
             error: None,
+            reminders,
         }
     }
 
+    #[cfg(test)]
     pub fn from_habit(habit: &Habit) -> Self {
-        let mut form = Self::new(habit.created);
+        Self::from_habit_with(habit, true)
+    }
+
+    pub fn from_habit_with(habit: &Habit, reminders: bool) -> Self {
+        let mut form = Self::new_with(habit.created, reminders);
         form.original = Some(habit.id.clone());
         form.name.set(&habit.name);
         match &habit.schedule {
@@ -276,21 +293,21 @@ impl Form {
             KeyCode::Esc => return FormAction::Cancel,
             KeyCode::Enter => return self.submit(),
             KeyCode::Tab => {
-                self.focus = self.focus.next();
+                self.focus = self.focus.next(self.reminders);
                 self.error = None;
                 return FormAction::Continue;
             }
             KeyCode::BackTab => {
-                self.focus = self.focus.previous();
+                self.focus = self.focus.previous(self.reminders);
                 self.error = None;
                 return FormAction::Continue;
             }
             KeyCode::Up => {
-                self.focus = self.focus.previous();
+                self.focus = self.focus.previous(self.reminders);
                 return FormAction::Continue;
             }
             KeyCode::Down => {
-                self.focus = self.focus.next();
+                self.focus = self.focus.next(self.reminders);
                 return FormAction::Continue;
             }
             _ => {}
@@ -419,7 +436,11 @@ impl Form {
         };
 
         let reminder_text = self.reminder.text().trim().to_string();
-        let reminder = if reminder_text.is_empty() {
+        let reminder = if !self.reminders {
+            // The row is hidden without the notifications module; keep whatever
+            // the habit already had instead of silently clearing it.
+            NaiveTime::parse_from_str(&reminder_text, "%H:%M").ok()
+        } else if reminder_text.is_empty() {
             None
         } else {
             match NaiveTime::parse_from_str(&reminder_text, "%H:%M") {
@@ -457,7 +478,8 @@ impl Form {
 
     pub fn draw(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
         let width = area.width.saturating_sub(4).clamp(30, 66);
-        let height = 14.min(area.height);
+        let rows_count = if self.reminders { 12 } else { 11 };
+        let height = (rows_count + 2).min(area.height);
         let popup = centered(area, width, height);
         frame.render_widget(Clear, popup);
 
@@ -469,6 +491,7 @@ impl Form {
 
         let rows = Layout::vertical([Constraint::Length(1); 12]).split(inner);
         let field_width = inner.width.saturating_sub(12) as usize;
+        let mut row = 0;
 
         frame.render_widget(
             Paragraph::new(field_row(
@@ -476,44 +499,53 @@ impl Form {
                 self.input_line(&self.name, Field::Name, theme, field_width, "Gym"),
                 theme,
             )),
-            rows[0],
+            rows[row],
         );
+        row += 1;
         frame.render_widget(
             Paragraph::new(field_row("Schedule", self.kind_line(theme), theme)),
-            rows[1],
+            rows[row],
         );
+        row += 1;
         frame.render_widget(
             Paragraph::new(field_row("Days", self.days_line(theme), theme)),
-            rows[2],
+            rows[row],
         );
+        row += 1;
         frame.render_widget(
             Paragraph::new(field_row("Per week", self.weekly_line(theme), theme)),
-            rows[3],
+            rows[row],
         );
+        row += 1;
         frame.render_widget(
             Paragraph::new(field_row(
                 "Starts",
                 self.input_line(&self.start, Field::Start, theme, 10, "2026-11-10"),
                 theme,
             )),
-            rows[4],
+            rows[row],
         );
+        row += 1;
         frame.render_widget(
             Paragraph::new(field_row(
                 "Ends",
                 self.input_line(&self.ends, Field::Ends, theme, 10, "never"),
                 theme,
             )),
-            rows[5],
+            rows[row],
         );
-        frame.render_widget(
-            Paragraph::new(field_row(
-                "Remind",
-                self.input_line(&self.reminder, Field::Reminder, theme, 5, "off"),
-                theme,
-            )),
-            rows[6],
-        );
+        row += 1;
+        if self.reminders {
+            frame.render_widget(
+                Paragraph::new(field_row(
+                    "Remind",
+                    self.input_line(&self.reminder, Field::Reminder, theme, 5, "off"),
+                    theme,
+                )),
+                rows[row],
+            );
+            row += 1;
+        }
         frame.render_widget(
             Paragraph::new(field_row(
                 "Tags",
@@ -526,16 +558,18 @@ impl Form {
                 ),
                 theme,
             )),
-            rows[7],
+            rows[row],
         );
+        row += 1;
         frame.render_widget(
             Paragraph::new(field_row(
                 "Description",
                 self.input_line(&self.note, Field::Note, theme, field_width, "optional"),
                 theme,
             )),
-            rows[8],
+            rows[row],
         );
+        row += 1;
 
         if let Some(error) = &self.error {
             frame.render_widget(
@@ -543,9 +577,10 @@ impl Form {
                     truncate(error, inner.width as usize),
                     Style::default().fg(theme.missed),
                 ))),
-                rows[9],
+                rows[row],
             );
         }
+        row += 1;
 
         let submit = if self.focus == Field::Save {
             Span::styled(
@@ -555,7 +590,8 @@ impl Form {
         } else {
             Span::styled("  save  ", Style::default().fg(theme.dim))
         };
-        frame.render_widget(Paragraph::new(Line::from(submit)), rows[10]);
+        frame.render_widget(Paragraph::new(Line::from(submit)), rows[row]);
+        row += 1;
 
         let hint = if inner.width >= 47 {
             "tab next · arrows change · enter save · esc cancel"
@@ -567,7 +603,7 @@ impl Form {
                 hint,
                 Style::default().fg(theme.dim),
             ))),
-            rows[11],
+            rows[row],
         );
     }
 
@@ -826,6 +862,28 @@ mod tests {
         assert_eq!(form.tags.text(), "health, morning");
         assert_eq!(form.note.text(), "ten minutes");
         assert_eq!(form.title(), " Edit habit ");
+    }
+
+    #[test]
+    fn without_the_notifications_module_the_remind_row_is_skipped() {
+        let mut form = Form::new_with(date("2026-11-10"), false);
+        form.focus = Field::Ends;
+        form.handle_key(key(KeyCode::Tab));
+        assert_eq!(form.focus, Field::Tags);
+        form.handle_key(key(KeyCode::BackTab));
+        assert_eq!(form.focus, Field::Ends);
+
+        // A time saved before the module was removed survives an edit.
+        let mut habit = Habit::new(
+            "gym".into(),
+            "Gym".into(),
+            Schedule::Daily,
+            date("2026-11-01"),
+        );
+        habit.reminder = NaiveTime::parse_from_str("09:00", "%H:%M").ok();
+        let mut form = Form::from_habit_with(&habit, false);
+        let draft = submitted(form.handle_key(key(KeyCode::Enter)));
+        assert_eq!(draft.reminder, habit.reminder);
     }
 
     #[test]

@@ -53,6 +53,16 @@ pub fn pad_left(text: &str, target: usize) -> String {
     out
 }
 
+/// Show paths under the home directory as `~/…`, like the docs do.
+pub fn pretty_path(path: &std::path::Path) -> String {
+    if let Some(home) = std::env::var_os("HOME")
+        && let Ok(rest) = path.strip_prefix(std::path::PathBuf::from(home))
+    {
+        return format!("~/{}", rest.display());
+    }
+    path.display().to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
