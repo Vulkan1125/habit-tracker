@@ -2,9 +2,9 @@
 
 **A feature-rich habit tracker that stays calm in the terminal.** Streaks, weekly quotas, cheat
 days, tags, descriptions, dated notes, per-habit reminders, monthly HTML reports and a heatmap —
-plus a plain JSON file you can read, diff, `grep` and script against. Simple to start and deep when
-you need it: the core is one small binary, reminders and reports are optional modules, and there is
-no daemon, no account and no network access.
+plus a plain JSON file you can read, diff, `grep` and script against. Minimal to begin. Depth on
+demand. The core is one small binary, reminders and reports are optional modules, and there is no
+daemon, no account and no network access.
 
 [![CI](https://github.com/Vulkan1125/habit-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/Vulkan1125/habit-tracker/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -20,7 +20,7 @@ Run `habit` and you get a full-screen TUI. Run `habit done gym` and you get a sc
 read and write the same file, so terminal widgets, cron jobs and shell aliases all see the same
 state. The TUI can now act on any past day, so backfilling no longer needs a second tool.
 
-### Simple to start, deep when you need it
+### Minimal to begin. Depth on demand.
 
 `habit add "Gym"` and `habit done gym` are close to the whole learning curve; the TUI opens with one
 command and needs no config file. Quotas, weekday schedules, start and end dates, cheat days, tags,
