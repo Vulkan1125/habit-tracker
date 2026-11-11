@@ -388,10 +388,11 @@ offer_path() {
     mkdir -p "$(dirname "$rc")" 2>/dev/null || true
     if [ -f "$rc" ] && grep -F "$line" "$rc" >/dev/null 2>&1; then
         say "PATH is already set in $rc"
-    else
-        printf '\n# habit\n%s\n' "$line" >>"$rc" && say "added $dir to PATH in $rc" ||
-            die "could not write to $rc"
+    elif printf '\n# habit\n%s\n' "$line" >>"$rc"; then
+        say "added $dir to PATH in $rc"
         say "open a new terminal, or run: . \"$rc\""
+    else
+        die "could not write to $rc"
     fi
 }
 
