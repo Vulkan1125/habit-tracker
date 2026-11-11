@@ -155,7 +155,7 @@ fn hint(app: &App, max_width: usize) -> String {
         Mode::ReminderSetup => "y install now · n later".to_string(),
         Mode::Modules => "enter install / remove · esc close".to_string(),
         Mode::Normal if app.filtering => {
-            "type to filter · #tag for tags · enter keep · esc clear".to_string()
+            "type to filter · #tag or #a|#b · enter keep · esc clear".to_string()
         }
         Mode::Normal if app.tab == Tab::Tags && app.tag_focus.is_none() => {
             "j k move · enter open · e rename · tab next · ? help · q quit".to_string()
@@ -645,6 +645,37 @@ mod tests {
         assert!(screen.contains("today"));
         assert!(screen.contains("Habits"), "{screen}");
         assert!(screen.contains("Tags"), "{screen}");
+    }
+
+    #[test]
+    fn quota_habits_get_a_weekly_bar_chart() {
+        let mut app = app_with("");
+        let index = app
+            .data
+            .add_habit(
+                "Gym",
+                Schedule::TimesPerWeek { n: 3 },
+                date() - chrono::Duration::days(14),
+            )
+            .unwrap();
+        let id = app.data.habits[index].id.clone();
+        // Two complete past weeks and an open current one.
+        for back in [13, 12, 11, 8, 3, 2] {
+            app.data
+                .log
+                .set(date() - chrono::Duration::days(back), &id, true);
+        }
+        let screen = render(&mut app, 90, 30);
+        assert!(screen.contains("weekly quota"), "{screen}");
+        assert!(screen.contains("3/3"), "{screen}");
+        assert!(screen.contains("0/3"), "{screen}");
+    }
+
+    #[test]
+    fn daily_habits_do_not_get_a_weekly_bar_chart() {
+        let mut app = app_with("Gym");
+        let screen = render(&mut app, 90, 30);
+        assert!(!screen.contains("weekly quota"), "{screen}");
     }
 
     #[test]

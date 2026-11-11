@@ -148,6 +148,12 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         Span::styled(completion_note, Style::default().fg(theme.dim)),
     ]));
 
+    let quota = quota_lines(app, habit, &theme);
+    if !quota.is_empty() {
+        lines.push(Line::raw(""));
+        lines.extend(quota);
+    }
+
     lines.push(Line::raw(""));
     lines.extend(heatmap_lines(app, habit, inner_width, &theme));
     lines.push(Line::raw(""));
@@ -244,6 +250,49 @@ fn legend(inner_width: usize, theme: &Theme) -> Line<'static> {
         spans.push(Span::styled(" not due", Style::default().fg(theme.dim)));
     }
     Line::from(spans)
+}
+
+fn quota_lines(app: &App, habit: &Habit, theme: &Theme) -> Vec<Line<'static>> {
+    let weeks = stats::weekly_history(habit, &app.data.history(), app.today, app.week_start, 4);
+    if weeks.len() < 2 {
+        return Vec::new();
+    }
+
+    let mut lines = vec![Line::from(Span::styled(
+        "weekly quota",
+        Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
+    ))];
+    for week in &weeks {
+        let ratio = if week.target == 0 {
+            0.0
+        } else {
+            (f64::from(week.done) / f64::from(week.target)).min(1.0)
+        };
+        let (filled, empty) = theme.bar(ratio, 8);
+        let reached = week.done >= u32::from(week.target);
+        let bar_style = if reached {
+            Style::default().fg(theme.done)
+        } else {
+            Style::default().fg(theme.accent)
+        };
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{}  ", week.start.format("%b %d")),
+                Style::default().fg(theme.dim),
+            ),
+            Span::styled(filled, bar_style),
+            Span::styled(empty, Style::default().fg(theme.border)),
+            Span::styled(
+                format!("  {}/{}", week.done, week.target),
+                if reached {
+                    Style::default().fg(theme.done)
+                } else {
+                    Style::default().fg(theme.dim)
+                },
+            ),
+        ]));
+    }
+    lines
 }
 
 fn heatmap_lines(

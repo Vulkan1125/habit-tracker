@@ -119,6 +119,9 @@ habit tags                        # every tag with a habit count
 habit rename-tag health fitness   # rename everywhere; merges if the name is taken
 habit merge-tags morning mind     # fold one tag into an existing one
 habit list --tag health           # AND: every listed tag must match
+habit list --tag health|fitness   # OR: either tag is enough
+habit export --output habits.csv  # every habit and its history as CSV
+habit import habits.csv           # additive: merges new habits and events
 habit describe gym "ten minutes is enough"
 habit describe gym                # print the current description
 habit describe gym --clear
@@ -146,7 +149,8 @@ and the dialog stays open; `esc` cancels, and saving an empty note removes it. D
 the left, notes on the right, newest first.
 
 In the TUI press `/` and type. `#health` matches tags, while plain words match the name, id, tags
-and description. Multiple tokens are ANDed, so `run #morning` narrows to morning runs.
+and description. Multiple tokens are ANDed, so `run #morning` narrows to morning runs, while a
+single token can offer alternatives: `#health|#fitness` matches habits with either tag.
 
 ### The TUI
 
@@ -162,7 +166,8 @@ and description. Multiple tokens are ANDed, so `run #morning` narrows to morning
 - **Date navigation** (`[` `]`, `t` for today): check off, excuse, inspect or annotate any past day.
 - **Detail pane** with `description:` directly under the habit title, and the description text,
   schedule line and tags all indented beneath it, then current and best streak, this week's bar,
-  30-day completion, an adaptive heatmap (up to 52 weeks) and dated notes (date left, note right).
+  30-day completion, a weekly bar chart for quota habits (the last four weeks, each with its
+  `done/target`), an adaptive heatmap (up to 52 weeks) and dated notes (date left, note right).
 - **Dated notes**, newest first: press `n` after checking a habit off to journal the day, or `tab`
   inside the dialog to file it under another date (never the future, never before the habit's
   start); empty input removes the note and edits are covered by undo.
@@ -482,7 +487,7 @@ Nothing else to configure. The data file is created on the first change.
 | `d` | archive or restore (history kept) |
 | `x` | delete the habit and its history (asks first) |
 | `u` | undo the last change |
-| `/` | filter — plain text matches name/id/tags/description, `#tag` matches tags, `enter` keeps, `esc` clears |
+| `/` | filter — plain text matches name/id/tags/description, `#tag` matches tags, `#a\|#b` matches either, `enter` keeps, `esc` clears |
 | `r` | reload the data file from disk |
 | `T` | next colour theme (saved to config) |
 | `m` | switch dark / light mode (saved) |
@@ -519,9 +524,11 @@ Global flags, usable before or after the subcommand:
 | `habit done <HABIT>` | `--date YYYY-MM-DD` | check off today or backfill a day |
 | `habit undo <HABIT>` | `--date YYYY-MM-DD` | un-check a day |
 | `habit cheat <HABIT>` | `--date YYYY-MM-DD`, `--off` | mark or remove an excused day |
-| `habit list` | `--tag TAG` (repeatable) | table of habits, today's status and streaks |
+| `habit list` | `--tag TAG` (repeatable; `a\|b` for either) | table of habits, today's status and streaks |
 | `habit stats` | `--habit <HABIT>`, `--days N` (default 30) | streak, week, completion, check-ins, cheats |
 | `habit log` | `-n N` (default 14), `--all` | recent check-ins and cheat days, newest first |
+| `habit export` | `--output FILE` / `-o FILE` | write every habit, tag, note and event as CSV (stdout by default) |
+| `habit import <FILE>` | | merge a CSV export; existing habits are kept and only missing events are added |
 | `habit tag <HABIT> <TAG>…` | `--remove` | add or remove tags |
 | `habit tags` | | every tag with its habit count |
 | `habit rename-tag <OLD> <NEW>` | | rename a tag everywhere it is used; merges if `NEW` is taken |
@@ -648,6 +655,25 @@ marked day so the UI can show and explain the second.
 command. Empty or whitespace-only files are treated as “no data”. Older (version 1, 2 or 3) files
 load with the new fields defaulted and are written back as version 4.
 
+### CSV export and import
+
+`habit export` writes one row per event (a check-in, a cheat day or a dated note) and repeats the
+habit's metadata on each row; a habit with no events gets one metadata-only row. `habit import`
+reads that shape back:
+
+```sh
+habit export --output habits.csv   # or omit --output to print to stdout
+habit import habits.csv
+```
+
+The columns are `habit_id, habit_name, schedule, start, end, tags, description, reminder, archived,
+date, status, note`. Schedules use `daily`, `days:mon,wed` or `weekly:4`; tags are separated with
+`;`. Import is additive and safe: a known `habit_id` keeps its local metadata and only gains the
+events it is missing, so running the same import twice changes nothing. An unknown id is created
+with its exported id and metadata, and a name clash with a *different* id is refused rather than
+silently duplicated. Standard CSV quoting handles commas, quotes and newlines in descriptions and
+notes.
+
 ## Configuration
 
 Optional, at `~/.config/habit/config.toml` (`$XDG_CONFIG_HOME/habit/config.toml` when set):
@@ -685,6 +711,10 @@ habit cheat gym --date 2026-11-06
 
 # commit your history alongside your data
 cp "$(habit path)" ~/notes/habits-$(date +%F).json
+
+# a spreadsheet copy, or moving everything to another machine
+habit export --output habits.csv
+habit import habits.csv
 
 # a monthly page you can keep or print
 habit report --last-month --open
@@ -731,7 +761,7 @@ A few decisions worth knowing:
 ## Development
 
 ```sh
-cargo test                                  # 206 tests
+cargo test                                  # 224 tests
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 cargo build --release
@@ -752,14 +782,13 @@ several widths and in the overlays.
 and filtering, a detail-pane trend graph and the visual/theming pass. Later releases added dated
 notes, the Tags tab, tag rename/merge, the Archive tab and opt-in native reminders; `0.7.0` added
 per-habit reminder times with a first-run setup prompt and monthly HTML reports; `0.8.0` moved
-reminders and reports into optional modules you install with `habit modules`. The trend line itself
-went away in `0.3.0`, leaving the adaptive heatmap. **[ROADMAP.md](ROADMAP.md)** keeps the original
-design notes and decisions.
+reminders and reports into optional modules you install with `habit modules`; `0.9.0` added the
+weekly quota chart, either/or tag filters and CSV export/import. The trend line itself went away
+in `0.3.0`, leaving the adaptive heatmap. **[ROADMAP.md](ROADMAP.md)** keeps the original design
+notes and decisions.
 
 Ideas still on the table, roughly in order:
 
-- A quota bar chart and richer multi-tag views.
-- Import/export helpers (CSV, old `data.json`).
 - Windows CI.
 
 Not planned: accounts, sync, telemetry, plugins, a server.

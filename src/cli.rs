@@ -7,7 +7,8 @@ use chrono::{Duration, NaiveDate, NaiveTime};
 use clap::{Parser, Subcommand};
 
 use habit::config::Config;
-use habit::format::{pad_left, pad_right, truncate, width};
+use habit::csv;
+use habit::format::{pad_left, pad_right, pretty_path, truncate, width};
 use habit::model::{Data, Day, Habit, Schedule, normalize_tag};
 use habit::modules;
 use habit::reminders;
@@ -90,7 +91,7 @@ pub enum Command {
     },
     /// List habits with today's status and streaks
     List {
-        /// Only habits carrying every one of these tags
+        /// Only these tags (repeat for AND, use health|fitness for OR)
         #[arg(long = "tag", value_name = "TAG")]
         tags: Vec<String>,
     },
@@ -111,6 +112,18 @@ pub enum Command {
         /// Include days with no check-ins
         #[arg(long)]
         all: bool,
+    },
+    /// Export every habit and its history as CSV
+    Export {
+        /// Write to this file instead of stdout
+        #[arg(long, short = 'o', value_name = "FILE")]
+        output: Option<std::path::PathBuf>,
+    },
+    /// Import a CSV export (additive; existing habits are kept)
+    Import {
+        /// CSV file to read
+        #[arg(value_name = "FILE")]
+        file: std::path::PathBuf,
     },
     /// Toggle a tag on a habit
     Tag {
@@ -425,6 +438,8 @@ pub fn run(
         Command::List { tags } => print_list(data, today, config, &tags)?,
         Command::Stats { habit, days } => print_stats(data, habit.as_deref(), today, config, days)?,
         Command::Log { count, all } => print_log(data, today, count, all),
+        Command::Export { output } => export_csv(data, output.as_deref())?,
+        Command::Import { file } => import_csv(store, data, &file)?,
         Command::Tag {
             habit,
             tags,
@@ -1057,18 +1072,88 @@ fn tags_line(habit: &Habit) -> String {
         .join(" ")
 }
 
+/// One `--tag` argument may offer alternatives with `|`; separate arguments are
+/// still ANDed together. Unknown or empty names are ignored, as before.
+fn tag_groups(tags: &[String]) -> Vec<Vec<String>> {
+    tags.iter()
+        .map(|arg| arg.split('|').filter_map(normalize_tag).collect())
+        .filter(|group: &Vec<String>| !group.is_empty())
+        .collect()
+}
+
+fn matches_tag_groups(habit: &Habit, groups: &[Vec<String>]) -> bool {
+    groups
+        .iter()
+        .all(|group| group.iter().any(|tag| habit.has_tag(tag)))
+}
+
+fn export_csv(data: &Data, output: Option<&std::path::Path>) -> Result<()> {
+    let text = csv::export(data);
+    match output {
+        Some(path) => {
+            std::fs::write(path, text)
+                .with_context(|| format!("could not write {}", path.display()))?;
+            println!(
+                "exported {} to {}",
+                habit::format::plural(data.habits.len() as u32, "habit"),
+                pretty_path(path)
+            );
+        }
+        None => print!("{text}"),
+    }
+    Ok(())
+}
+
+fn import_csv(store: &Store, data: &mut Data, file: &std::path::Path) -> Result<()> {
+    let text = std::fs::read_to_string(file)
+        .with_context(|| format!("could not read {}", file.display()))?;
+    let report = csv::import(data, &text)?;
+    let changed =
+        report.habits_added > 0 || report.checkins > 0 || report.cheats > 0 || report.notes > 0;
+    if !changed {
+        println!("nothing new to import from {}", pretty_path(file));
+        return Ok(());
+    }
+    store.save(data)?;
+
+    let mut parts = Vec::new();
+    if report.habits_added > 0 {
+        parts.push(habit::format::plural(
+            report.habits_added as u32,
+            "new habit",
+        ));
+    }
+    if report.habits_merged > 0 {
+        parts.push(habit::format::plural(
+            report.habits_merged as u32,
+            "existing habit",
+        ));
+    }
+    if report.checkins > 0 {
+        parts.push(habit::format::plural(report.checkins, "check-in"));
+    }
+    if report.cheats > 0 {
+        parts.push(habit::format::plural(report.cheats, "cheat day"));
+    }
+    if report.notes > 0 {
+        parts.push(habit::format::plural(report.notes, "note"));
+    }
+    println!("imported {} from {}", parts.join(", "), pretty_path(file));
+    Ok(())
+}
+
 fn print_list(data: &Data, today: NaiveDate, config: &Config, tags: &[String]) -> Result<()> {
     if data.habits.is_empty() {
         println!("No habits yet. Try: habit add \"Drink water\"");
         return Ok(());
     }
 
-    let wanted: Vec<String> = tags.iter().filter_map(|tag| normalize_tag(tag)).collect();
-    let rows: Vec<&Habit> = data
+    let groups = tag_groups(tags);
+    let rows = data
         .habits
         .iter()
-        .filter(|habit| wanted.iter().all(|tag| habit.has_tag(tag)))
-        .collect();
+        .filter(|habit| matches_tag_groups(habit, &groups))
+        .collect::<Vec<_>>();
     if rows.is_empty() {
         println!("No habits match those tags.");
         return Ok(());
@@ -1845,5 +1930,79 @@ mod tests {
         print_list(&data, today, &Config::default(), &["health".into()]).unwrap();
         let error = print_list(&data, today, &Config::default(), &["nope".into()]);
         assert!(error.is_ok());
+    }
+
+    #[test]
+    fn export_then_import_round_trips_through_a_file() {
+        let (dir, store) = store();
+        let today = date("2026-11-10");
+        let mut data = Data::default();
+        let index = data
+            .add_habit("Gym", Schedule::Daily, today - Duration::days(3))
+            .unwrap();
+        let id = data.habits[index].id.clone();
+        data.log.set(today - Duration::days(1), &id, true);
+        data.habits[index].add_tag("health");
+
+        let file = dir.path().join("habits.csv");
+        run(
+            Command::Export {
+                output: Some(file.clone()),
+            },
+            &store,
+            &mut data,
+            today,
+            &Config::default(),
+        )
+        .unwrap();
+        assert!(file.exists());
+
+        let mut restored = Data::default();
+        run(
+            Command::Import { file: file.clone() },
+            &store,
+            &mut restored,
+            today,
+            &Config::default(),
+        )
+        .unwrap();
+        assert_eq!(restored, data);
+
+        // Importing the same file again adds nothing.
+        run(
+            Command::Import { file },
+            &store,
+            &mut restored,
+            today,
+            &Config::default(),
+        )
+        .unwrap();
+        assert_eq!(restored, data);
+    }
+
+    #[test]
+    fn piped_tags_match_either_while_arguments_stay_anded() {
+        let mut data = Data::default();
+        let today = date("2026-11-10");
+        data.add_habit("Gym", Schedule::Daily, today).unwrap();
+        data.add_habit("Read", Schedule::Daily, today).unwrap();
+        data.habits[0].tags = vec!["health".into(), "morning".into()];
+        data.habits[1].tags = vec!["mind".into()];
+
+        let either = tag_groups(&["health|mind".into()]);
+        assert!(matches_tag_groups(&data.habits[0], &either));
+        assert!(matches_tag_groups(&data.habits[1], &either));
+
+        let both = tag_groups(&["health|mind".into(), "morning".into()]);
+        assert!(matches_tag_groups(&data.habits[0], &both));
+        assert!(
+            !matches_tag_groups(&data.habits[1], &both),
+            "separate --tag arguments are ANDed"
+        );
+
+        // Empty or unparsable groups do not filter anything out.
+        let empty = tag_groups(&["!!!".into()]);
+        assert!(empty.is_empty());
+        assert!(matches_tag_groups(&data.habits[0], &empty));
     }
 }

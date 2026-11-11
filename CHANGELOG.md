@@ -8,6 +8,27 @@ All notable changes to `habit` are recorded here. The format follows
 
 Nothing yet.
 
+## [0.9.0] — 2026-11-11
+
+### Added
+
+- **Weekly quota chart.** Quota habits (`--weekly N`) now show their last four weeks in the detail
+  pane, one row per week, e.g. `Oct 06  ████░░░░  3/4`. Complete weeks turn green, the current week
+  stays open, and the chart only appears once there are at least two weeks of history.
+- **Either/or tag filtering.** A single filter token can offer alternatives: `#health|#fitness` in
+  the TUI filter, and `habit list --tag health|fitness`. Separate tokens and separate `--tag`
+  arguments still mean AND, so `#health|#fitness #morning` narrows to morning habits in either tag.
+- **CSV export and import.** `habit export [--output FILE]` writes every habit, its id, schedule,
+  tags, description, reminder, archive state and complete history (check-ins, cheat days and dated
+  notes) as CSV. `habit import FILE` merges that file back additively: known ids gain only the
+  missing events, unknown ids keep their exported id, and re-importing the same file changes
+  nothing. Standard quoting handles commas, quotes and newlines.
+
+### Changed
+
+- `habit list --tag` accepts `|` inside one argument for OR, while repeating `--tag` still requires
+  every tag. The help overlay and README describe the new syntax.
+
 ## [0.8.0] — 2026-11-11
 
 ### Added

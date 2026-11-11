@@ -24,7 +24,7 @@ const KEYS: &[(&str, &str)] = &[
     ("d", "archive or restore"),
     ("x", "delete (asks first)"),
     ("u", "undo the last change"),
-    ("/", "filter by text, tag or #tag"),
+    ("/", "filter by text or #tag (#a|#b for either)"),
     ("T", "next colour theme"),
     ("m", "dark / light mode"),
     ("M", "install or remove modules"),

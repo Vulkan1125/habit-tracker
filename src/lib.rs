@@ -5,6 +5,7 @@
 //! `habit-notify` are the optional modules the user installs on demand.
 
 pub mod config;
+pub mod csv;
 pub mod format;
 pub mod model;
 pub mod modules;

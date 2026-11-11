@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use chrono::{Datelike, Duration, NaiveDate, NaiveTime, Weekday};
 use serde::{Deserialize, Serialize};
 
@@ -133,6 +133,60 @@ impl Schedule {
         }
     }
 
+    /// Compact, round-trippable form used by the CSV import and export.
+    ///
+    /// `daily`, `days:mon,wed,fri`, or `weekly:4`. Unlike [`Schedule::describe`]
+    /// this is meant for machines, so it never abbreviates a seven-day week into
+    /// "daily" unless the habit really is daily.
+    pub fn code(&self) -> String {
+        match self {
+            Schedule::Daily => "daily".to_string(),
+            Schedule::Weekdays { days } => {
+                let names: Vec<String> = ALL_DAYS
+                    .iter()
+                    .filter(|day| days.contains(day))
+                    .map(|day| day.short().to_ascii_lowercase())
+                    .collect();
+                format!("days:{}", names.join(","))
+            }
+            Schedule::TimesPerWeek { n } => format!("weekly:{n}"),
+        }
+    }
+
+    /// Parses the form written by [`Schedule::code`].
+    pub fn from_code(raw: &str) -> Result<Schedule> {
+        let raw = raw.trim();
+        if raw.eq_ignore_ascii_case("daily") {
+            return Ok(Schedule::Daily);
+        }
+        if let Some(rest) = raw.strip_prefix("days:") {
+            let mut days = BTreeSet::new();
+            for part in rest.split(',') {
+                let part = part.trim();
+                if part.is_empty() {
+                    continue;
+                }
+                let day = Day::parse(part)
+                    .with_context(|| format!("unknown weekday \"{part}\" in schedule"))?;
+                days.insert(day);
+            }
+            if days.is_empty() {
+                bail!("a weekday schedule needs at least one day");
+            }
+            return Ok(Schedule::Weekdays { days });
+        }
+        if let Some(rest) = raw.strip_prefix("weekly:") {
+            let n: u8 = rest
+                .trim()
+                .parse()
+                .with_context(|| format!("weekly quota must be a number, found \"{rest}\""))?;
+            let schedule = Schedule::TimesPerWeek { n };
+            schedule.validate()?;
+            return Ok(schedule);
+        }
+        bail!("unknown schedule \"{raw}\" (use daily, days:mon,wed or weekly:3)")
+    }
+
     pub fn validate(&self) -> Result<()> {
         match self {
             Schedule::TimesPerWeek { n } if !(1..=7).contains(n) => {
@@ -146,7 +200,7 @@ impl Schedule {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Habit {
     pub id: String,
     pub name: String,
@@ -375,7 +429,7 @@ impl TagError {
 /// Completion history: `date -> set of habit ids`.
 ///
 /// Stored as a map so the JSON stays small, sorted and easy to hand-edit.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Log {
     entries: BTreeMap<NaiveDate, BTreeSet<String>>,
@@ -440,6 +494,15 @@ impl Log {
             .map(|(date, _)| *date)
     }
 
+    /// Every date on which the habit was checked off, oldest first.
+    pub fn dates_for(&self, habit_id: &str) -> Vec<NaiveDate> {
+        self.entries
+            .iter()
+            .filter(|(_, ids)| ids.contains(habit_id))
+            .map(|(date, _)| *date)
+            .collect()
+    }
+
     pub fn total_for(&self, habit_id: &str) -> u32 {
         self.entries
             .values()
@@ -459,7 +522,7 @@ impl Log {
 ///
 /// Only the first cheat day of a habit in a calendar month is excused; later
 /// ones in the same month are ordinary days and can break a streak.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Cheats {
     entries: BTreeMap<NaiveDate, BTreeSet<String>>,
@@ -526,6 +589,15 @@ impl Cheats {
             .unwrap_or_default()
     }
 
+    /// Every date recorded as a cheat day for the habit, oldest first.
+    pub fn dates_for(&self, habit_id: &str) -> Vec<NaiveDate> {
+        self.entries
+            .iter()
+            .filter(|(_, ids)| ids.contains(habit_id))
+            .map(|(date, _)| *date)
+            .collect()
+    }
+
     /// Excused days used in the calendar month containing `date`.
     pub fn used_in_month(&self, habit_id: &str, date: NaiveDate) -> u32 {
         let first = date.with_day(1).unwrap_or(date);
@@ -558,7 +630,7 @@ pub struct History<'a> {
     pub cheats: &'a Cheats,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Data {
     #[serde(default = "default_version")]
     pub version: u32,
@@ -1161,5 +1233,33 @@ mod tests {
         let json = serde_json::to_string(&habit).unwrap();
         let back: Habit = serde_json::from_str(&json).unwrap();
         assert_eq!(back.note_on(date("2026-11-09")), Some("felt strong"));
+    }
+
+    #[test]
+    fn schedule_codes_round_trip() {
+        let weekdays = Schedule::Weekdays {
+            days: BTreeSet::from([Day::Mon, Day::Wed, Day::Fri]),
+        };
+        let quota = Schedule::TimesPerWeek { n: 4 };
+        for schedule in [Schedule::Daily, weekdays, quota] {
+            let code = schedule.code();
+            assert_eq!(Schedule::from_code(&code).unwrap(), schedule, "code {code}");
+        }
+    }
+
+    #[test]
+    fn schedule_codes_are_compact_and_reject_nonsense() {
+        assert_eq!(Schedule::Daily.code(), "daily");
+        assert_eq!(
+            Schedule::Weekdays {
+                days: BTreeSet::from([Day::Tue, Day::Thu])
+            }
+            .code(),
+            "days:tue,thu"
+        );
+        assert_eq!(Schedule::TimesPerWeek { n: 2 }.code(), "weekly:2");
+        assert!(Schedule::from_code("sometimes").is_err());
+        assert!(Schedule::from_code("days:").is_err());
+        assert!(Schedule::from_code("weekly:9").is_err());
     }
 }

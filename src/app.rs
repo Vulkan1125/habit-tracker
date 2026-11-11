@@ -1384,19 +1384,34 @@ fn rect_contains(rect: Rect, column: u16, row: u16) -> bool {
 }
 
 /// `#tag` filters tags; every other token matches name, id, tags or the note.
+///
+/// A single token can offer alternatives with `|`, so `#health|#fitness` matches
+/// habits carrying either tag while `#health #fitness` still requires both.
 fn matches_query(habit: &Habit, query: &str) -> bool {
-    query.split_whitespace().all(|token| {
-        if let Some(tag) = token.strip_prefix('#') {
-            return habit.tags.iter().any(|candidate| candidate.contains(tag));
-        }
-        habit.name.to_lowercase().contains(token)
-            || habit.id.contains(token)
-            || habit.tags.iter().any(|tag| tag.contains(token))
-            || habit
-                .note
-                .as_deref()
-                .is_some_and(|note| note.to_lowercase().contains(token))
-    })
+    query
+        .split_whitespace()
+        .all(|token| match_token(habit, token))
+}
+
+fn match_token(habit: &Habit, token: &str) -> bool {
+    if let Some(raw) = token.strip_prefix('#') {
+        let alternatives: Vec<&str> = raw
+            .split('|')
+            .map(|part| part.trim().trim_start_matches('#'))
+            .filter(|part| !part.is_empty())
+            .collect();
+        return !alternatives.is_empty()
+            && alternatives
+                .iter()
+                .any(|tag| habit.tags.iter().any(|candidate| candidate.contains(tag)));
+    }
+    habit.name.to_lowercase().contains(token)
+        || habit.id.contains(token)
+        || habit.tags.iter().any(|tag| tag.contains(token))
+        || habit
+            .note
+            .as_deref()
+            .is_some_and(|note| note.to_lowercase().contains(token))
 }
 
 /// `YYYY-MM-DD`, rejecting impossible dates.
@@ -1446,6 +1461,29 @@ mod tests {
         assert_eq!(app.visible_indices(), vec![0]);
         app.filter = "gym #evening".into();
         assert!(app.visible_indices().is_empty());
+    }
+
+    #[test]
+    fn filter_takes_the_either_or_of_piped_tags() {
+        let mut app = app();
+        let index = app
+            .data
+            .add_habit("Read", Schedule::Daily, date("2026-11-01"))
+            .unwrap();
+        app.data.habits[index].tags = vec!["mind".into()];
+
+        app.filter = "#health|#mind".into();
+        assert_eq!(app.visible_indices(), vec![0, 1]);
+        app.filter = "#health|#nope".into();
+        assert_eq!(app.visible_indices(), vec![0]);
+        app.filter = "#hea|#min".into();
+        assert_eq!(app.visible_indices(), vec![0, 1], "parts match as prefixes");
+        app.filter = "#no|#nope".into();
+        assert!(app.visible_indices().is_empty());
+
+        // A new token is still ANDed on top of the alternatives.
+        app.filter = "#health|#mind gym".into();
+        assert_eq!(app.visible_indices(), vec![0]);
     }
 
     #[test]

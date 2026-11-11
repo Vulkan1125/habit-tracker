@@ -151,7 +151,8 @@ journal without turning the app into a journal app.
 ## 4. Tags and tag filtering
 
 **Shipped in 0.2.0.** Tags are normalised, sorted, rendered as chips and accepted as `#tag` in the
-filter. Filtering is AND-only; OR syntax is still open. Rename/merge shipped in 0.5.0.
+filter. Filtering was AND-only until 0.9.0 added `#a|#b` (either tag) to both the TUI filter and
+`habit list --tag`. Rename/merge shipped in 0.5.0.
 
 **Data**
 
@@ -169,7 +170,8 @@ from JSON when empty, like `note` and `archived`.
 
 **Open**
 
-- OR filtering (`#a|#b`) if the parser can stay simple.
+- ~~OR filtering (`#a|#b`) if the parser can stay simple.~~ **Shipped in 0.9.0:** a `|` inside one
+  token offers alternatives, while separate tokens and separate `--tag` arguments stay ANDed.
 
 **Shipped in 0.5.0 — rename and merge**
 
@@ -184,8 +186,9 @@ overloads `habit tag`, whose arguments are a habit followed by tags.
 ## 5. Graph in the detail pane
 
 **Shipped in 0.2.0** as a compact rolling 7-day completion **sparkline** above the heatmap; the
-heatmap stayed, and is now adaptive up to 52 weeks. No new dependency was needed. The richer chart
-(axes, target line, switchable ranges, quota bars) is still open.
+heatmap stayed, and is now adaptive up to 52 weeks. No new dependency was needed. **0.9.0** added
+the quota bars as a four-week text chart in the detail pane, for `TimesPerWeek` habits only. The
+richer chart (axes, target line, switchable ranges) is still open.
 
 The heatmap answers "which days did I do it". It does not answer "am I trending up".
 
@@ -219,7 +222,8 @@ The heatmap answers "which days did I do it". It does not answer "am I trending 
 
 ## Carried over from 0.1.x
 
-- A quota bar chart and richer multi-tag views.
+- A quota bar chart and richer multi-tag views — **shipped in 0.9.0** as the weekly quota chart in
+  the detail pane and `#a|#b` / `--tag a|b` either-or filtering.
 - Optional reminders/notifications — **shipped in 0.6.0** as `habit remind` plus `habit schedule
   install`, which writes a launchd agent or systemd user timer. 0.7.0 added per-habit reminder
   times, one job per distinct time, and a first-run setup prompt. 0.8.0 made the whole feature an
@@ -228,7 +232,9 @@ The heatmap answers "which days did I do it". It does not answer "am I trending 
 - A monthly HTML report — **shipped in 0.7.0** as `habit report` plus `habit schedule reports
   install`; 0.8.0 moved it into the installable reports module. One self-contained page per month,
   on demand or on a chosen day.
-- Import/export helpers (CSV, and reading a previous `data.json`).
+- Import/export helpers — **shipped in 0.9.0** as `habit export` and `habit import`, covering habits,
+  metadata and their complete history. Reading an older `data.json` was already handled by the
+  store's version upgrade path.
 - Windows CI.
 
 ## Non-goals

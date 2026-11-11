@@ -352,6 +352,56 @@ pub fn weekly_progress(
     Some((done, n))
 }
 
+/// One week of a quota habit's history.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WeekProgress {
+    pub start: NaiveDate,
+    pub done: u32,
+    pub target: u8,
+}
+
+/// The last `weeks` weeks of a quota habit, oldest first.
+///
+/// Only `TimesPerWeek` habits have a weekly quota, so other schedules return an
+/// empty list. The final entry is the week containing `today`, or the week the
+/// habit ended in. Weeks before the habit started are left out.
+pub fn weekly_history(
+    habit: &Habit,
+    history: &History,
+    today: NaiveDate,
+    week_start: Day,
+    weeks: u32,
+) -> Vec<WeekProgress> {
+    let Schedule::TimesPerWeek { n } = habit.schedule else {
+        return Vec::new();
+    };
+    let last_day = scope_end(habit, today);
+    if last_day < habit.created {
+        return Vec::new();
+    }
+    let last_week = start_of_week(last_day, week_start);
+    let first_week = start_of_week(habit.created, week_start);
+    let weeks = weeks.clamp(1, 52);
+    let from = (last_week - Duration::days(7 * i64::from(weeks - 1))).max(first_week);
+
+    let mut history_weeks = Vec::new();
+    let mut week = from;
+    while week <= last_week {
+        let done = history.log.count_between(
+            &habit.id,
+            week.max(habit.created),
+            (week + Duration::days(6)).min(last_day),
+        );
+        history_weeks.push(WeekProgress {
+            start: week,
+            done,
+            target: n,
+        });
+        week += Duration::days(7);
+    }
+    history_weeks
+}
+
 /// Done vs. target for the week containing `today` (quota habits use their quota).
 pub fn week_progress(
     habit: &Habit,
@@ -521,6 +571,61 @@ mod tests {
         let streak = current_streak(&f.habit, &f.history(), date("2026-11-13"), Day::Mon);
         assert_eq!(streak.length, 2);
         assert_eq!(streak.unit, Unit::Weeks);
+    }
+
+    #[test]
+    fn weekly_history_lists_recent_weeks_oldest_first() {
+        let f = Fixture::new(Schedule::TimesPerWeek { n: 3 }, "2026-10-19").done(&[
+            "2026-10-19",
+            "2026-10-20",
+            "2026-10-21", // first week: 3
+            "2026-10-26", // second week: 1
+            "2026-11-02",
+            "2026-11-03",
+            "2026-11-04",
+            "2026-11-05", // third week: 4
+            "2026-11-09",
+            "2026-11-10", // current week: 2
+        ]);
+        let weeks = weekly_history(&f.habit, &f.history(), date("2026-11-10"), Day::Mon, 3);
+        assert_eq!(
+            weeks,
+            vec![
+                WeekProgress {
+                    start: date("2026-10-26"),
+                    done: 1,
+                    target: 3
+                },
+                WeekProgress {
+                    start: date("2026-11-02"),
+                    done: 4,
+                    target: 3
+                },
+                WeekProgress {
+                    start: date("2026-11-09"),
+                    done: 2,
+                    target: 3
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn weekly_history_never_starts_before_the_habit_did() {
+        let f = Fixture::new(Schedule::TimesPerWeek { n: 2 }, "2026-11-04")
+            .done(&["2026-11-04", "2026-11-06"]);
+        let weeks = weekly_history(&f.habit, &f.history(), date("2026-11-10"), Day::Mon, 4);
+        assert_eq!(weeks.len(), 2);
+        assert_eq!(weeks[0].start, date("2026-11-02"));
+        assert_eq!(weeks[0].done, 2);
+        assert_eq!(weeks[1].start, date("2026-11-09"));
+        assert_eq!(weeks[1].done, 0);
+    }
+
+    #[test]
+    fn weekly_history_is_empty_for_other_schedules() {
+        let f = Fixture::new(Schedule::Daily, "2026-11-01");
+        assert!(weekly_history(&f.habit, &f.history(), date("2026-11-10"), Day::Mon, 4).is_empty());
     }
 
     #[test]
