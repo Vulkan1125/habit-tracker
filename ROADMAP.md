@@ -204,51 +204,16 @@ The heatmap answers "which days did I do it". It does not answer "am I trending 
 
 ---
 
-## 6. The UI should be gorgeous
+## 6. UI enhancements
 
-**Shipped in 0.2.0**, with one explicit product decision: **square borders, not rounded**. The
-capability detection, seven palettes, per-habit accents and responsive layout all landed.
+**Shipped in 0.2.0.** A focused visual pass instead of a pile of new features:
 
-A deliberate design pass, not a pile of colours. Goal: the screenshot should make someone want to
-install it.
-
-**Layout**
-
-- Square borders everywhere (an explicit product decision), one shared gutter, no full-width
-  horizontal rules.
-- The detail pane gets a clear visual hierarchy: habit name as a heading, metadata dimmed, numbers
-  right-aligned and tabular.
-- Overlays (help, form, confirm) float over the panes using `Clear`; the backdrop is not dimmed,
-  because that would need a second full redraw on every frame.
-
-**Colour**
-
-- Truecolor when the terminal reports it, 256-colour fallback, `mono` for the rest — detected once
-  at startup, no config required.
-- Per-habit accent derived from a hash of the id, so a habit keeps its colour across sessions
-  without storing one; used for the detail heading.
-- Dedicated semantics: green done, amber open, red missed, cyan cheat, dim not-due. Every colour
-  also has a glyph or weight difference so nothing depends on colour alone.
-
-**Motion and detail**
-
-- No animation loop: the app redraws on input only. Any "motion" must be static styling.
-- Sub-cell progress bars (partial blocks) for smoother bars.
-- A real empty state with the first command to run.
-- Status line that reads like a sentence and fades old messages.
-- Selection shown by a full-width tinted bar plus `▸`, not by reversing a single glyph.
-
-**Themes**
-
-`dark`, `light`, `mono` stay. Consider `nord`/`solarized` as extra presets only if they cost nothing
-beyond palette tables.
-
-**Definition of done**
-
-- Renders correctly at 60, 80, 96 and 200 columns (and degrades sensibly below that).
-- A frame-by-frame review at each width, in all seven themes and both modes.
-- `TestBackend` frame tests for the layout, help, form and confirm overlays.
-- README screenshots regenerated from the final look.
+- a responsive layout that works from narrow terminals up to wide ones;
+- a clear hierarchy in the detail pane, with dimmed metadata and aligned numbers;
+- status colours that also carry a glyph or weight, so nothing depends on colour alone;
+- progress bars, a real empty state and a status line that reads like a sentence;
+- seven colour themes, each with a light and a dark mode, truecolor detection and a `mono` fallback;
+- frame tests at several widths and for the overlays, and regenerated README screenshots.
 
 ---
 
