@@ -155,6 +155,224 @@ fn rows<'a>(data: &'a Data, today: NaiveDate, month: NaiveDate, week_start: Day)
     rows
 }
 
+/// One day of the month-wide performance series used by the report chart.
+struct DayPoint {
+    date: NaiveDate,
+    done: u32,
+    possible: u32,
+    /// Journal entries written for this date, as `(habit name, note)`.
+    notes: Vec<(String, String)>,
+}
+
+/// The days of `month` that have happened, with how much of what was expected
+/// got done. Quota habits count only on days they were checked off; days with
+/// nothing due stay in the series so the chart has a continuous x-axis.
+fn performance(data: &Data, today: NaiveDate, month: NaiveDate) -> Vec<DayPoint> {
+    let history = data.history();
+    let start = month.with_day(1).unwrap_or(month);
+    let end = month_end(start).min(today);
+    if start > end {
+        return Vec::new();
+    }
+
+    let mut points = Vec::new();
+    let mut date = start;
+    while date <= end {
+        let mut done = 0;
+        let mut possible = 0;
+        let mut notes = Vec::new();
+        for habit in &data.habits {
+            match stats::status_on(habit, &history, date, today) {
+                Status::Done => {
+                    done += 1;
+                    possible += 1;
+                }
+                Status::Missed | Status::Pending => possible += 1,
+                _ => {}
+            }
+            if let Some(note) = habit.note_on(date) {
+                notes.push((habit.name.clone(), note.to_string()));
+            }
+        }
+        points.push(DayPoint {
+            date,
+            done,
+            possible,
+            notes,
+        });
+        date += Duration::days(1);
+    }
+    points
+}
+
+/// A seven-day rolling average of the daily completion percentage. Days with
+/// nothing due do not drag the average down.
+fn rolling_average(points: &[DayPoint], window: usize) -> Vec<Option<u32>> {
+    let window = window.max(1);
+    points
+        .iter()
+        .enumerate()
+        .map(|(index, _)| {
+            let from = index.saturating_sub(window - 1);
+            let values: Vec<u32> = points[from..=index]
+                .iter()
+                .filter(|point| point.possible > 0)
+                .map(|point| percent(point.done, point.possible))
+                .collect();
+            if values.is_empty() {
+                None
+            } else {
+                Some(values.iter().sum::<u32>() / values.len() as u32)
+            }
+        })
+        .collect()
+}
+
+fn points_attr(points: &[(f64, f64)]) -> String {
+    points
+        .iter()
+        .map(|(x, y)| format!("{x:.1},{y:.1}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A no-JavaScript SVG line chart: the pale line is each day, the strong line
+/// is the seven-day average, and hovering a day reveals its numbers and notes.
+fn chart_svg(points: &[DayPoint]) -> String {
+    if points.len() < 2 {
+        return String::new();
+    }
+
+    const WIDTH: f64 = 720.0;
+    const HEIGHT: f64 = 220.0;
+    const LEFT: f64 = 36.0;
+    const RIGHT: f64 = 14.0;
+    const TOP: f64 = 14.0;
+    const BOTTOM: f64 = 26.0;
+    let inner_width = WIDTH - LEFT - RIGHT;
+    let inner_height = HEIGHT - TOP - BOTTOM;
+    let x = |index: usize| LEFT + inner_width * index as f64 / (points.len() - 1) as f64;
+    let y = |value: u32| TOP + inner_height * (1.0 - f64::from(value) / 100.0);
+
+    let daily: Vec<(f64, f64)> = points
+        .iter()
+        .enumerate()
+        .filter(|(_, point)| point.possible > 0)
+        .map(|(index, point)| (x(index), y(percent(point.done, point.possible))))
+        .collect();
+    let average: Vec<(f64, f64)> = rolling_average(points, 7)
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, value)| value.map(|value| (x(index), y(value))))
+        .collect();
+
+    let mut grid = String::new();
+    for value in [0, 25, 50, 75, 100] {
+        grid.push_str(&format!(
+            "<line x1=\"{LEFT}\" y1=\"{y}\" x2=\"{right}\" y2=\"{y}\" class=\"chart-grid\"/>\
+             <text x=\"{label}\" y=\"{text_y}\" text-anchor=\"end\">{value}%</text>",
+            y = y(value),
+            right = WIDTH - RIGHT,
+            label = LEFT - 7.0,
+            text_y = y(value) + 4.0,
+        ));
+    }
+
+    let mut hover = String::new();
+    let cell = inner_width / points.len() as f64;
+    for (index, point) in points.iter().enumerate() {
+        let day = point.date.format("%a %-d %b");
+        let mut label = if point.possible == 0 {
+            format!("{day} · nothing due")
+        } else {
+            format!(
+                "{day} · {}% ({}/{})",
+                percent(point.done, point.possible),
+                point.done,
+                point.possible
+            )
+        };
+        if !point.notes.is_empty() {
+            let notes = point
+                .notes
+                .iter()
+                .map(|(habit, note)| format!("{habit}: {}", note.replace('\n', " ")))
+                .collect::<Vec<_>>()
+                .join(" · ");
+            label.push_str(&format!(" · {notes}"));
+        }
+        hover.push_str(&format!(
+            "<rect x=\"{x:.1}\" y=\"{TOP}\" width=\"{cell:.1}\" height=\"{inner_height}\" \
+             class=\"hover\"><title>{label}</title></rect>",
+            x = LEFT + cell * index as f64,
+            label = escape(&label),
+        ));
+    }
+
+    let area = if average.is_empty() {
+        String::new()
+    } else {
+        let baseline = HEIGHT - BOTTOM;
+        format!(
+            "<path d=\"M {first_x:.1} {baseline:.1} L {line} L {last_x:.1} {baseline:.1} Z\" \
+             class=\"area\"/>",
+            first_x = average[0].0,
+            last_x = average[average.len() - 1].0,
+            line = average
+                .iter()
+                .map(|(x, y)| format!("{x:.1} {y:.1}"))
+                .collect::<Vec<_>>()
+                .join(" L "),
+            baseline = baseline,
+        )
+    };
+
+    let first_label = points[0].date.format("%-d %b");
+    let last_label = points[points.len() - 1].date.format("%-d %b");
+
+    format!(
+        r#"<svg class="chart" viewBox="0 0 {WIDTH} {HEIGHT}" role="img" aria-label="Daily completion and seven-day average for the month">
+  <defs>
+    <linearGradient id="chart-fill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="currentColor" stop-opacity=".22"/>
+      <stop offset="1" stop-color="currentColor" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  {grid}
+  <line x1="{LEFT}" y1="{top}" x2="{right}" y2="{top}" class="target"/>
+  {area}
+  <polyline points="{daily}" class="daily"/>
+  <polyline points="{average}" class="average"/>
+  {hover}
+  <text x="{LEFT}" y="{axis_y}" class="axis">{first_label}</text>
+  <text x="{right}" y="{axis_y}" class="axis" text-anchor="end">{last_label}</text>
+</svg>"#,
+        grid = grid,
+        top = TOP,
+        right = WIDTH - RIGHT,
+        area = area,
+        daily = points_attr(&daily),
+        average = points_attr(&average),
+        hover = hover,
+        axis_y = HEIGHT - 7.0,
+        first_label = escape(&first_label.to_string()),
+        last_label = escape(&last_label.to_string()),
+    )
+}
+
+/// Dated journal entries inside the report month, newest first.
+fn notes_in_month(habit: &Habit, month: NaiveDate) -> Vec<(NaiveDate, &str)> {
+    let start = month.with_day(1).unwrap_or(month);
+    let end = month_end(start);
+    habit
+        .notes
+        .iter()
+        .rev()
+        .filter(|(date, _)| **date >= start && **date <= end)
+        .map(|(date, text)| (*date, text.as_str()))
+        .collect()
+}
+
 fn escape(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -199,6 +417,25 @@ pub fn render(data: &Data, today: NaiveDate, month: NaiveDate, week_start: Day) 
     let done: u32 = rows.iter().map(|row| row.done).sum();
     let possible: u32 = rows.iter().map(|row| row.possible).sum();
     let cheats: u32 = rows.iter().map(|row| row.cheats).sum();
+    let series = performance(data, today, month);
+    let chart = chart_svg(&series);
+    let chart_html = if chart.is_empty() {
+        String::new()
+    } else {
+        format!(
+            r#"<section class="chart-card">
+  <div class="chart-head">
+    <div>
+      <p class="eyebrow">performance</p>
+      <h2>Month at a glance</h2>
+    </div>
+    <p class="legend"><span class="key daily"></span> daily <span class="key average"></span> 7-day average</p>
+  </div>
+  {chart}
+</section>
+"#
+        )
+    };
 
     let start_offset =
         (month.weekday().num_days_from_monday() as i64 - week_start.index() as i64).rem_euclid(7);
@@ -228,34 +465,70 @@ pub fn render(data: &Data, today: NaiveDate, month: NaiveDate, week_start: Day) 
         } else {
             String::new()
         };
+        let description = habit
+            .note
+            .as_deref()
+            .map(|text| {
+                format!(
+                    "<p class=\"description\">{}</p>",
+                    escape(text).replace('\n', "<br>")
+                )
+            })
+            .unwrap_or_default();
 
         let mut cells = String::new();
         for _ in 0..start_offset {
             cells.push_str("<span class=\"day blank\"></span>");
         }
         for (date, status) in &row.days {
-            let class = status_class(*status);
+            let mut class = status_class(*status).to_string();
+            let mut title = format!("{} · {}", date.format("%a %-d %b"), status_label(*status));
+            if let Some(note) = habit.note_on(*date) {
+                class.push_str(" has-note");
+                title.push_str(" · ");
+                title.push_str(&note.replace('\n', " "));
+            }
             cells.push_str(&format!(
-                "<span class=\"day {class}\" title=\"{} · {}\">{}</span>",
-                date.format("%a %-d %b"),
-                status_label(*status),
+                "<span class=\"day {class}\" title=\"{}\">{}</span>",
+                escape(&title),
                 date.day()
             ));
         }
 
+        let notes = notes_in_month(habit, month);
+        let notes_html = if notes.is_empty() {
+            String::new()
+        } else {
+            let items = notes
+                .iter()
+                .map(|(date, text)| {
+                    format!(
+                        "<li><time>{}</time><span>{}</span></li>",
+                        date.format("%a %-d %b"),
+                        escape(text).replace('\n', "<br>")
+                    )
+                })
+                .collect::<String>();
+            format!("<div class=\"notes\"><h3>Notes</h3><ul>{items}</ul></div>")
+        };
+
         habits_html.push_str(&format!(
             r#"<article class="habit">
   <div class="habit-head">
-    <h2>{name}{archived}</h2>
-    <p>{schedule}{tags}</p>
+    <div>
+      <h2>{name}{archived}</h2>
+      <p>{schedule}{tags}</p>
+    </div>
+    <div class="score"><strong>{percent}%</strong><span>of target</span></div>
   </div>
+  {description}
   <div class="stats">
-    <span><strong>{percent}%</strong> of target</span>
     <span>{detail}{cheat_line}</span>
     <span>streak {streak}</span>
   </div>
   <div class="weekdays">{weekdays}</div>
   <div class="grid">{cells}</div>
+  {notes_html}
 </article>
 "#,
             name = escape(&habit.name),
@@ -269,6 +542,7 @@ pub fn render(data: &Data, today: NaiveDate, month: NaiveDate, week_start: Day) 
             schedule = escape(&schedule),
             tags = tags,
             percent = percent(row.done, row.possible),
+            description = description,
             detail = escape(&detail),
             cheat_line = escape(&cheat_line),
             streak = escape(&row.streak),
@@ -277,6 +551,7 @@ pub fn render(data: &Data, today: NaiveDate, month: NaiveDate, week_start: Day) 
                 .map(|label| format!("<span>{label}</span>"))
                 .collect::<String>(),
             cells = cells,
+            notes_html = notes_html,
         ));
     }
 
@@ -294,61 +569,110 @@ pub fn render(data: &Data, today: NaiveDate, month: NaiveDate, week_start: Day) 
 <style>
 :root {{
   color-scheme: light dark;
-  --bg: #f6f4ef; --card: #fffdf8; --ink: #28251f; --muted: #7c766a;
-  --line: #e3ded2; --done: #3f8a5c; --cheat: #3f7f99; --missed: #b4574f;
-  --pending: #c58b2d; --blank: #f0ece3;
+  --bg: #f4f1ea; --card: #fffdf8; --ink: #23211c; --muted: #7b7466;
+  --line: #e6e0d3; --done: #3d8a5f; --cheat: #3f7f99; --missed: #b4574f;
+  --pending: #c58b2d; --blank: #efeae0; --shadow: rgba(50, 44, 32, .06);
 }}
 @media (prefers-color-scheme: dark) {{
   :root {{
-    --bg: #191a18; --card: #212320; --ink: #ece9e0; --muted: #a29d90;
+    --bg: #171815; --card: #21231f; --ink: #ece9e0; --muted: #a29d90;
     --line: #34362f; --done: #72b98c; --cheat: #72aec2; --missed: #d67f76;
-    --pending: #d8ab5f; --blank: #292b27;
+    --pending: #d8ab5f; --blank: #2a2c27; --shadow: rgba(0, 0, 0, .35);
   }}
 }}
 * {{ box-sizing: border-box; }}
 body {{
-  margin: 0; padding: 2rem 1rem; background: var(--bg); color: var(--ink);
-  font: 15px/1.5 ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
+  margin: 0; padding: 2.5rem 1.25rem 3rem; background: var(--bg); color: var(--ink);
+  font: 15px/1.55 ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
 }}
-main {{ max-width: 880px; margin: 0 auto; }}
-.eyebrow {{ margin: 0; color: var(--muted); letter-spacing: .14em; text-transform: uppercase; font-size: 11px; }}
-h1 {{ margin: .2rem 0 .3rem; font-size: clamp(2rem, 5vw, 3.2rem); letter-spacing: -.03em; }}
-.meta {{ margin: 0 0 2rem; color: var(--muted); }}
-.summary {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin-bottom: 2rem; }}
-.summary div {{ background: var(--card); padding: 1rem 1.2rem; }}
-.summary strong {{ display: block; font-size: 1.6rem; }}
-.summary span {{ color: var(--muted); font-size: 13px; }}
-.habit {{ background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 1.2rem 1.4rem; margin-bottom: 1rem; }}
-.habit-head {{ display: flex; flex-wrap: wrap; justify-content: space-between; gap: .3rem 1rem; align-items: baseline; }}
-h2 {{ margin: 0; font-size: 1.15rem; }}
-.habit-head p {{ margin: 0; color: var(--muted); font-size: 13px; }}
-.tag {{ margin-left: .35rem; padding: .05rem .4rem; border: 1px solid var(--line); border-radius: 999px; font-size: 11px; }}
-.badge {{ margin-left: .45rem; padding: .05rem .45rem; border-radius: 999px; background: var(--blank); color: var(--muted); font-size: 11px; font-weight: 400; vertical-align: middle; }}
-.stats {{ display: flex; flex-wrap: wrap; gap: .3rem 1.2rem; margin: .8rem 0 .9rem; color: var(--muted); font-size: 13px; }}
-.stats strong {{ color: var(--ink); }}
-.weekdays, .grid {{ display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; max-width: 620px; }}
-.weekdays span {{ color: var(--muted); font-size: 10px; text-align: center; }}
-.day {{ display: flex; align-items: center; justify-content: center; padding: .45rem 0; border-radius: 5px; background: var(--blank); font-size: 12px; }}
+main {{ max-width: 900px; margin: 0 auto; }}
+.eyebrow {{ margin: 0; color: var(--muted); letter-spacing: .16em; text-transform: uppercase; font-size: 11px; font-weight: 600; }}
+h1 {{ margin: .3rem 0 .5rem; font-size: clamp(2.2rem, 6vw, 3.6rem); letter-spacing: -.035em; line-height: 1.05; }}
+.meta {{ margin: 0; color: var(--muted); }}
+.hero {{ display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1.5rem; padding-bottom: 1.8rem; }}
+.ring {{
+  --pct: 0; position: relative; width: 128px; height: 128px; border-radius: 50%; flex: none;
+  background: conic-gradient(var(--done) calc(var(--pct) * 1%), var(--blank) 0);
+  display: grid; place-items: center;
+}}
+.ring::after {{ content: ""; position: absolute; inset: 9px; border-radius: 50%; background: var(--bg); }}
+.ring div {{ position: relative; z-index: 1; text-align: center; }}
+.ring strong {{ display: block; font-size: 1.7rem; letter-spacing: -.02em; }}
+.ring span {{ color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .1em; }}
+.summary {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; margin-bottom: 1.5rem; box-shadow: 0 10px 30px var(--shadow); }}
+.summary div {{ background: var(--card); padding: 1.1rem 1.3rem; }}
+.summary strong {{ display: block; font-size: 1.7rem; line-height: 1.2; }}
+.summary span {{ color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .07em; }}
+.chart-card {{ background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 1.3rem 1.5rem .9rem; margin-bottom: 1.5rem; box-shadow: 0 10px 30px var(--shadow); }}
+.chart-head {{ display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .4rem 1rem; margin-bottom: .4rem; }}
+.chart-head h2 {{ font-size: 1.1rem; }}
+.legend {{ margin: 0; color: var(--muted); font-size: 12px; }}
+.legend .key {{ display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin: 0 .3rem 0 .7rem; }}
+.legend .key:first-child {{ margin-left: 0; }}
+.key.daily {{ background: var(--done); opacity: .4; }}
+.key.average {{ background: var(--done); }}
+.chart {{ width: 100%; height: auto; color: var(--done); display: block; }}
+.chart text {{ fill: var(--muted); font-size: 10px; }}
+.chart .chart-grid {{ stroke: var(--line); stroke-width: 1; }}
+.chart .target {{ stroke: var(--muted); stroke-dasharray: 4 4; stroke-opacity: .35; }}
+.chart .area {{ fill: url(#chart-fill); }}
+.chart .daily {{ fill: none; stroke: var(--done); stroke-opacity: .35; stroke-width: 1.5; stroke-linejoin: round; }}
+.chart .average {{ fill: none; stroke: var(--done); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }}
+.chart .hover {{ fill: transparent; }}
+.chart .hover:hover {{ fill: var(--ink); fill-opacity: .05; }}
+.section-head {{ display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin: 2rem 0 .8rem; }}
+.section-head h2 {{ font-size: 1.25rem; }}
+.section-head p {{ margin: 0; color: var(--muted); font-size: 13px; }}
+.habit {{ background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 1.3rem 1.5rem; margin-bottom: 1rem; box-shadow: 0 10px 30px var(--shadow); }}
+.habit-head {{ display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem 1rem; align-items: flex-start; }}
+h2 {{ margin: 0; font-size: 1.15rem; letter-spacing: -.01em; }}
+.habit-head p {{ margin: .15rem 0 0; color: var(--muted); font-size: 13px; }}
+.score {{ text-align: right; flex: none; }}
+.score strong {{ display: block; font-size: 1.35rem; line-height: 1.1; color: var(--done); }}
+.score span {{ color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .07em; }}
+.description {{ margin: .7rem 0 0; color: var(--muted); font-size: 13.5px; max-width: 68ch; }}
+.tag {{ margin-left: .35rem; padding: .05rem .45rem; border: 1px solid var(--line); border-radius: 999px; font-size: 11px; white-space: nowrap; }}
+.badge {{ margin-left: .45rem; padding: .05rem .45rem; border-radius: 999px; background: var(--blank); color: var(--muted); font-size: 11px; font-weight: 400; vertical-align: middle; white-space: nowrap; }}
+.stats {{ display: flex; flex-wrap: wrap; gap: .3rem 1.2rem; margin: .9rem 0 1rem; color: var(--muted); font-size: 13px; }}
+.weekdays, .grid {{ display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; max-width: 640px; }}
+.weekdays span {{ color: var(--muted); font-size: 10px; text-align: center; text-transform: uppercase; letter-spacing: .05em; }}
+.day {{ position: relative; display: flex; align-items: center; justify-content: center; padding: .5rem 0; border-radius: 6px; background: var(--blank); font-size: 12px; }}
 .day.blank {{ background: transparent; }}
 .day.done {{ background: var(--done); color: #fff; }}
 .day.cheat {{ background: var(--cheat); color: #fff; }}
 .day.missed {{ background: var(--missed); color: #fff; }}
 .day.pending {{ background: var(--pending); color: #fff; }}
 .day.muted {{ color: var(--muted); }}
-.empty {{ color: var(--muted); }}
-footer {{ margin-top: 2rem; color: var(--muted); font-size: 12px; }}
+.day.has-note::after {{ content: ""; position: absolute; right: 5px; bottom: 4px; width: 5px; height: 5px; border-radius: 50%; background: var(--ink); opacity: .55; }}
+.day.done.has-note::after, .day.cheat.has-note::after, .day.missed.has-note::after, .day.pending.has-note::after {{ background: #fff; opacity: .9; }}
+.notes {{ margin-top: 1rem; border-top: 1px solid var(--line); padding-top: .8rem; }}
+.notes h3 {{ margin: 0 0 .45rem; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .1em; }}
+.notes ul {{ list-style: none; margin: 0; padding: 0; display: grid; gap: .45rem; }}
+.notes li {{ display: grid; grid-template-columns: 7.5rem 1fr; gap: .8rem; font-size: 13.5px; }}
+.notes time {{ color: var(--muted); font-variant-numeric: tabular-nums; }}
+.empty {{ color: var(--muted); background: var(--card); border: 1px dashed var(--line); border-radius: 16px; padding: 2rem; text-align: center; }}
+footer {{ margin-top: 2rem; color: var(--muted); font-size: 12px; text-align: center; }}
+@media (max-width: 560px) {{
+  .notes li {{ grid-template-columns: 1fr; gap: .1rem; }}
+  .score {{ text-align: left; }}
+}}
 @media print {{
   body {{ background: #fff; color: #000; padding: 0; }}
-  .habit, .summary div {{ break-inside: avoid; }}
+  .habit, .summary div, .chart-card {{ break-inside: avoid; box-shadow: none; }}
 }}
 </style>
 </head>
 <body>
 <main>
-<header>
-  <p class="eyebrow">habit · monthly report</p>
-  <h1>{month_name}</h1>
-  <p class="meta">Generated {generated} · {habits} · {checkins} · {completion}% of target</p>
+<header class="hero">
+  <div>
+    <p class="eyebrow">habit · monthly report</p>
+    <h1>{month_name}</h1>
+    <p class="meta">Generated {generated} · {habits} · {checkins}</p>
+  </div>
+  <div class="ring" style="--pct: {completion}">
+    <div><strong>{completion}%</strong><span>of target</span></div>
+  </div>
 </header>
 <section class="summary">
   <div><strong>{habits_count}</strong><span>{habits}</span></div>
@@ -356,6 +680,11 @@ footer {{ margin-top: 2rem; color: var(--muted); font-size: 12px; }}
   <div><strong>{completion}%</strong><span>of target</span></div>
   <div><strong>{cheats}</strong><span>{cheat_days}</span></div>
 </section>
+{chart_html}
+<div class="section-head">
+  <h2>Habits</h2>
+  <p>hover a day for its note</p>
+</div>
 <section class="habits">
 {habits_html}</section>
 <footer>Generated by habit {version}. One JSON file, no account and no network.</footer>
@@ -372,6 +701,7 @@ footer {{ margin-top: 2rem; color: var(--muted); font-size: 12px; }}
         done = done,
         cheats = cheats,
         cheat_days = plural(cheats, "excused day"),
+        chart_html = chart_html,
         habits_html = habits_html,
         version = env!("CARGO_PKG_VERSION"),
     )
@@ -477,6 +807,64 @@ mod tests {
             Day::Mon,
         );
         assert!(html.contains("No habits were running in this month."));
+    }
+
+    #[test]
+    fn the_report_charts_daily_completion_and_a_rolling_average() {
+        let today = date("2026-11-10");
+        let mut data = Data::default();
+        data.add_habit("Gym", Schedule::Daily, date("2026-11-01"))
+            .unwrap();
+        for day in 1..=5 {
+            data.log
+                .set(date(&format!("2026-11-{day:02}")), "gym", true);
+        }
+        let html = render(&data, today, date("2026-11-01"), Day::Mon);
+        assert!(html.contains("Month at a glance"));
+        assert!(html.contains("class=\"chart\""));
+        assert!(html.contains("class=\"daily\""));
+        assert!(html.contains("class=\"average\""));
+        assert!(html.contains("7-day average"));
+        // The day rectangles are the no-JS hover targets.
+        assert!(html.contains("Sun 1 Nov · 100% (1/1)"), "{html}");
+        assert!(html.contains("Sat 7 Nov · 0% (0/1)"), "{html}");
+    }
+
+    #[test]
+    fn notes_are_listed_and_revealed_on_their_day() {
+        let today = date("2026-11-10");
+        let mut data = Data::default();
+        let index = data
+            .add_habit("Gym", Schedule::Daily, date("2026-11-01"))
+            .unwrap();
+        data.log.set(date("2026-11-03"), "gym", true);
+        data.habits[index].set_note(date("2026-11-03"), "felt strong & fast");
+        data.habits[index].note = Some("ten minutes\nno pressure".into());
+
+        let html = render(&data, today, date("2026-11-01"), Day::Mon);
+        assert!(
+            html.contains("class=\"day done has-note\""),
+            "the day cell should mark the note"
+        );
+        assert!(
+            html.contains("Tue 3 Nov · done · felt strong &amp; fast"),
+            "{html}"
+        );
+        assert!(html.contains("<p class=\"description\">ten minutes<br>no pressure</p>"));
+        assert!(html.contains("<div class=\"notes\"><h3>Notes</h3>"));
+        assert!(html.contains("<time>Tue 3 Nov</time><span>felt strong &amp; fast</span>"));
+    }
+
+    #[test]
+    fn days_without_a_note_have_no_marker() {
+        let today = date("2026-11-10");
+        let mut data = Data::default();
+        data.add_habit("Gym", Schedule::Daily, date("2026-11-01"))
+            .unwrap();
+        data.log.set(date("2026-11-03"), "gym", true);
+        let html = render(&data, today, date("2026-11-01"), Day::Mon);
+        assert!(!html.contains("class=\"day done has-note\""));
+        assert!(!html.contains("<div class=\"notes\">"));
     }
 
     #[test]

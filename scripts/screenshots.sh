@@ -31,13 +31,13 @@ done
 
 "$chromium" --headless=new --disable-gpu --hide-scrollbars \
     --force-device-scale-factor=2 \
-    --window-size=1240,1500 \
+    --window-size=1240,2600 \
     --screenshot="$dir/report.png" "file://$root/$dir/report.html" >/dev/null 2>&1
 magick "$dir/report.png" -fuzz 1% -trim +repage \
     -bordercolor '#f6f4ef' -border 40 "$dir/report.png"
-# The page is taller than the window; keep the header and the first two habit
-# cards, which is what fits beside the other README images.
-magick "$dir/report.png" -gravity North -crop x1916+0+0 +repage "$dir/report.png"
+# The page is taller than the window; keep the header, the chart and the first
+# habit card (with its notes), which is what fits beside the other README images.
+magick "$dir/report.png" -gravity North -crop x3400+0+0 +repage "$dir/report.png"
 
 rm -f "$dir"/*.html
 echo "screenshots: wrote $(ls "$dir"/*.png | wc -l | tr -d ' ') PNGs"

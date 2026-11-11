@@ -8,6 +8,29 @@ All notable changes to `habit` are recorded here. The format follows
 
 Nothing yet.
 
+## [0.10.0] — 2026-11-11
+
+### Added
+
+- **`habit uninstall`.** A single command that removes the data file and its backups, installed
+  modules, generated reports, the config file, scheduled reminder and report jobs, and the
+  `habit`, `habit-notify` and `habit-report` binaries. It prints the list and asks you to type
+  `yes`; `--force` skips the question and `--dry-run` only lists. Homebrew and Cargo build copies
+  leave their binaries to the tool that owns them.
+- **A performance chart in the monthly report.** Each report now opens with a month-wide SVG line
+  chart of daily completion and its seven-day rolling average. It needs no JavaScript: hovering a
+  day reveals its numbers, and a dot and tooltip mark days that have a note.
+- **Notes and descriptions in the report.** Every habit card lists its dated notes for the month,
+  and its description sits under the title. Each habit also gets its own completion score.
+
+### Changed
+
+- **The monthly report is redesigned** with a hero and completion ring, a summary strip, a chart
+  card, cleaner habit cards and light, dark and print styles.
+- **The installer is quieter.** `rustup`, `cargo install` and `apt-get`/`dnf`/`yum`/`pacman` now run
+  with their quiet flags, so a successful install no longer prints pages of compiler and package
+  manager output; the useful “installing Rust”, “compiling” and “rust ready” lines remain.
+
 ## [0.9.1] — 2026-11-11
 
 ### Fixed

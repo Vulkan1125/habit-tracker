@@ -231,7 +231,8 @@ The heatmap answers "which days did I do it". It does not answer "am I trending 
   as sketched here.
 - A monthly HTML report — **shipped in 0.7.0** as `habit report` plus `habit schedule reports
   install`; 0.8.0 moved it into the installable reports module. One self-contained page per month,
-  on demand or on a chosen day.
+  on demand or on a chosen day. **0.10.0** added the month-wide completion chart with its seven-day
+  average, per-habit scores, descriptions, and notes that are both listed and revealed on hover.
 - Import/export helpers — **shipped in 0.9.0** as `habit export` and `habit import`, covering habits,
   metadata and their complete history. Reading an older `data.json` was already handled by the
   store's version upgrade path.

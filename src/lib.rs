@@ -14,3 +14,4 @@ pub mod report;
 pub mod stats;
 pub mod store;
 pub mod theme;
+pub mod uninstall;

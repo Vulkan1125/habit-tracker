@@ -326,8 +326,11 @@ habit report --output ~/Desktop/habits.html
 ```
 
 Every habit gets its completion rate, quota weeks met, current streak, excused days and a day-by-day
-calendar using the same four statuses as the TUI. It reads well in a browser, prints cleanly, and
-can be committed, attached to a mail or turned into a PDF.
+calendar using the same four statuses as the TUI. The report opens with a month-wide chart that
+plots each day's completion with a seven-day rolling average, and hovering a day reveals its numbers
+together with any note written that day. Notes are also listed under each habit, with a dot on the
+day cell that has one. It reads well in a browser, prints cleanly, and can be committed, attached to
+a mail or turned into a PDF.
 
 ![The monthly HTML report, one card per habit](docs/screenshots/report.png)
 
@@ -367,7 +370,8 @@ The installer checks the download against the release's `SHA256SUMS` and install
 binaries — `habit`, `habit-notify` and `habit-report` — so `habit modules install …` works offline.
 On Debian/Ubuntu (`apt-get`), Fedora/RHEL (`dnf`/`yum`) and Arch (`pacman`) it uses the native
 package; everywhere else, including macOS, it unpacks the prebuilt binaries into `~/.local/bin`
-without needing root.
+without needing root. Its own output stays short: rustup, Cargo and the package managers run
+quietly, with a couple of status lines so you can tell what is happening.
 
 If no prebuilt build exists for your platform (Linux arm64, for example), it compiles from source.
 Rust is detected first: when `cargo` is missing the installer offers to set it up with
@@ -437,6 +441,19 @@ cargo build --release
 install -m 755 target/release/habit target/release/habit-notify \
     target/release/habit-report ~/.local/bin/
 ```
+
+### Uninstalling
+
+`habit uninstall` removes everything the program created: the data file with its `.json.bak` and
+`.json.tmp` siblings, installed modules, generated reports, the config file, scheduled reminder and
+report jobs, and the `habit`, `habit-notify` and `habit-report` binaries. It prints the list first
+and asks you to type `yes`; `--force` skips the question and `--dry-run` only prints the list.
+
+When this copy came from Homebrew or is a Cargo build directory, the binaries are left to the tool
+that owns them — the command prints the right one. Package-managed installs are removed with
+`brew uninstall habit`, `cargo uninstall habit` or the distribution's package manager. There is no
+undo, so it asks first; it does not edit your shell's rc file, so remove by hand any `PATH` line
+that `install.sh` added.
 
 Requires Rust 1.88 or newer (the MSRV is set in `Cargo.toml`; ratatui requires it too). Tested on
 macOS and Linux. Windows terminals are supported by crossterm but untested here.
@@ -550,6 +567,7 @@ Global flags, usable before or after the subcommand:
 | `habit modules` | | list every module and whether it is installed |
 | `habit modules install <NAME>` | | install `notify` or `report` |
 | `habit modules remove <NAME>` | | remove a module and its scheduled jobs, keeping habit data |
+| `habit uninstall` | `--force`, `--dry-run` | remove data, backups, modules, reports, config, scheduled jobs and binaries |
 | `habit path` | | print the data file path |
 | `habit config` | | print effective config, data path, theme and mode |
 | `habit themes` | | list the palettes |
@@ -761,7 +779,7 @@ A few decisions worth knowing:
 ## Development
 
 ```sh
-cargo test                                  # 225 tests
+cargo test                                  # 234 tests
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 cargo build --release

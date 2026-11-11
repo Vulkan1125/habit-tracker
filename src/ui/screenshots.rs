@@ -163,6 +163,10 @@ fn demo_data(today: NaiveDate) -> Data {
     data.habits[run].set_note(date("2026-11-10"), "easy recovery run after yesterday");
     data.habits[run].set_note(date("2026-11-09"), "legs heavy but went anyway");
     data.habits[run].set_note(date("2026-11-08"), "felt strong, 5k in 26:30");
+    data.habits[run].set_note(date("2026-10-30"), "cold morning, kept it short");
+    data.habits[run].set_note(date("2026-10-27"), "felt strong, 5k in 26:10");
+    data.habits[strength].set_note(date("2026-10-28"), "two sets is enough on a busy day");
+    data.habits[read].set_note(date("2026-10-29"), "finished a chapter on the train");
     data
 }
 

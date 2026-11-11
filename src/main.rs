@@ -34,6 +34,11 @@ fn main() -> ExitCode {
 fn run() -> Result<()> {
     let cli = Cli::parse();
     let store = Store::resolve(cli.data)?;
+    // Uninstall must work even when the data file is missing or broken, and it
+    // must not let module migration reinstall what it is about to delete.
+    if let Some(cli::Command::Uninstall { force, dry_run }) = cli.command.as_ref() {
+        return cli::uninstall(&store, *force, *dry_run);
+    }
     let today = cli.today.unwrap_or_else(|| Local::now().date_naive());
     let (config, warning) = Config::load();
 

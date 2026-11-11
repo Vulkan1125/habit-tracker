@@ -15,6 +15,7 @@ use habit::reminders;
 use habit::stats;
 use habit::store::Store;
 use habit::theme::ThemeName;
+use habit::uninstall;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -244,6 +245,15 @@ pub enum Command {
     Modules {
         #[command(subcommand)]
         action: Option<ModulesAction>,
+    },
+    /// Remove habit completely: data, backups, modules, reports, config, jobs and binaries
+    Uninstall {
+        /// Do not ask for confirmation
+        #[arg(long)]
+        force: bool,
+        /// Show what would be removed without deleting anything
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Print the effective configuration
     Config,
@@ -614,6 +624,7 @@ pub fn run(
         }
         Command::Schedule { action } => schedule(store, data, today, action)?,
         Command::Modules { action } => modules_command(store, data, action)?,
+        Command::Uninstall { force, dry_run } => uninstall(store, force, dry_run)?,
         Command::Config => {
             let path = Config::path();
             let state = match &path {
@@ -673,6 +684,64 @@ fn run_module(store: &Store, today: NaiveDate, name: &str, args: &[String]) -> R
         bail!("the {name} module exited with {status}");
     }
     Ok(())
+}
+
+pub fn uninstall(store: &Store, force: bool, dry_run: bool) -> Result<()> {
+    let platform = reminders::platform();
+    let mut jobs = Vec::new();
+    for prefixes in [&reminders::REMINDER_PREFIXES, &reminders::REPORT_PREFIXES] {
+        jobs.extend(reminders::installed(platform, prefixes)?);
+    }
+    jobs.sort();
+    jobs.dedup();
+
+    let current = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("habit"));
+    let config_path = Config::path();
+    let plan = uninstall::plan(store.path(), config_path.as_deref(), &current, jobs);
+
+    if plan.is_empty() {
+        println!("nothing to remove — habit is already gone");
+        return Ok(());
+    }
+
+    println!("habit uninstall will remove:");
+    for (path, label) in plan.paths() {
+        println!("  {} {}", pad_right(label, 30), pretty_path(path));
+    }
+    if let Some(note) = plan.package_manager {
+        println!("\n{note}.");
+    }
+    if dry_run {
+        println!("\ndry run: nothing was removed");
+        return Ok(());
+    }
+    if !force && !confirm_uninstall()? {
+        println!("cancelled — nothing was removed");
+        return Ok(());
+    }
+
+    let outcome = uninstall::remove(&plan);
+    for failure in &outcome.failures {
+        eprintln!("habit: could not remove {failure}");
+    }
+    if !outcome.failures.is_empty() {
+        bail!(
+            "removed {} item(s), but some files are still there",
+            outcome.removed
+        );
+    }
+    println!("removed {} item(s) — habit is uninstalled", outcome.removed);
+    Ok(())
+}
+
+fn confirm_uninstall() -> Result<bool> {
+    use std::io::{self, Write};
+
+    print!("Type \"yes\" to confirm: ");
+    io::stdout().flush().ok();
+    let mut answer = String::new();
+    io::stdin().read_line(&mut answer)?;
+    Ok(answer.trim().eq_ignore_ascii_case("yes"))
 }
 
 fn modules_command(store: &Store, data: &Data, action: Option<ModulesAction>) -> Result<()> {

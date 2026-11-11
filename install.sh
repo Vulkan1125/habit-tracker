@@ -247,7 +247,8 @@ if [ "$kind" = "source" ]; then
             say "dry run: would install Rust with rustup, then build habit $version"
             exit 0
         fi
-        sh "$tmp/rustup.sh" -y --profile minimal
+        say "installing Rust with rustup — this can take a minute"
+        sh "$tmp/rustup.sh" -y --profile minimal --quiet
         if [ -f "$HOME/.cargo/env" ]; then
             # shellcheck disable=SC1091
             . "$HOME/.cargo/env"
@@ -263,7 +264,7 @@ if [ "$kind" = "source" ]; then
     fi
     confirm "Build habit $version from source into $install_dir?" || exit 1
     say "compiling — this can take a few minutes"
-    cargo install --git "https://github.com/$REPO" --tag "$tag" --locked \
+    cargo install --quiet --git "https://github.com/$REPO" --tag "$tag" --locked \
         --root "$PREFIX" --force ||
         die "the build failed"
     binary="$install_dir/$BIN"
@@ -315,7 +316,7 @@ else
         deb)
             confirm "Install habit $version with apt-get?" || exit 1
             if have apt-get; then
-                run_root apt-get install -y "$tmp/$asset"
+                run_root apt-get install -y -qq "$tmp/$asset"
             else
                 run_root dpkg -i "$tmp/$asset"
             fi
@@ -324,15 +325,15 @@ else
         rpm)
             confirm "Install habit $version with dnf?" || exit 1
             if have dnf; then
-                run_root dnf install -y "$tmp/$asset"
+                run_root dnf install -y -q "$tmp/$asset"
             else
-                run_root yum install -y "$tmp/$asset"
+                run_root yum install -y -q "$tmp/$asset"
             fi
             install_dir="/usr/bin"
             ;;
         arch)
             confirm "Install habit $version with pacman?" || exit 1
-            run_root pacman -U --noconfirm "$tmp/$asset"
+            run_root pacman -U --noconfirm --quiet "$tmp/$asset"
             install_dir="/usr/bin"
             ;;
         *)
