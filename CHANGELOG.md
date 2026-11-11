@@ -8,6 +8,38 @@ All notable changes to `habit` are recorded here. The format follows
 
 Nothing yet.
 
+## [0.7.0] — 2026-11-11
+
+### Added
+
+- **Per-habit reminder times.** `Habit.reminder` holds an optional local time, set in the add/edit
+  dialog's **Remind** field or with `habit add --remind HH:MM` and
+  `habit remind-time <HABIT> [HH:MM] [--clear]`. Reminders stay off until a habit gets a time, and
+  `habit schedule install` now writes one OS job per distinct time instead of one global job, with
+  `habit remind --at HH:MM` narrowing a run to the habits due at that time. Re-installing syncs:
+  units for times no habit uses any more are removed, along with the single-unit names from 0.6.0.
+- **A first-run notification setup prompt.** Enabling a reminder for the first time explains the
+  one-time setup in the TUI and offers to install it; choosing **later** keeps the time saved but
+  silent, so nothing is scheduled without an explicit yes. macOS's own permission prompt is called
+  out there too.
+- **Monthly HTML reports.** `habit report` writes one self-contained page per month to
+  `<data dir>/reports/habit-YYYY-MM.html`, with `--month YYYY-MM`, `--last-month`, `--output FILE`,
+  `--open` and `--notify`. Each habit gets its completion rate, quota weeks met, streak, excused
+  days and a day-by-day calendar in the TUI's status colours; the page carries inline CSS, no
+  scripts and no network, and prints cleanly.
+- **Scheduled reports.** `habit schedule reports install [--day 1-28] [--at HH:MM]` runs
+  `habit report --last-month --notify` on the chosen day (the 1st by default), with `status` and
+  `remove` alongside; days 1–28 are enforced so every month has the date.
+
+### Changed
+
+- The on-disk format is now **version 4**. The additive `reminder` field bumps `DATA_VERSION`, so a
+  0.6.0 build refuses a file written here instead of dropping the times on its next save. Version
+  1–3 files load with reminders off and are stamped as version 4 on the next save.
+- `habit schedule install` no longer takes `--at`: the times come from the habits themselves.
+- The add/edit dialog has a **Remind** field between the end date and the tags, and the detail pane
+  shows the time beside the schedule.
+
 ## [0.6.0] — 2026-11-11
 
 ### Added

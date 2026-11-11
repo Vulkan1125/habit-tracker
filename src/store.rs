@@ -190,7 +190,7 @@ mod tests {
         assert!(data.habits[0].is_active_on(date("2026-01-02")));
         store.save(&data).unwrap();
         let raw = fs::read_to_string(&path).unwrap();
-        assert!(raw.contains("\"version\": 3"), "{raw}");
+        assert!(raw.contains("\"version\": 4"), "{raw}");
     }
 
     #[test]

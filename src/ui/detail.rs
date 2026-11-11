@@ -69,6 +69,12 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         format!(" · {}", habit.window_label()),
         Style::default().fg(theme.dim),
     ));
+    if let Some(reminder) = habit.reminder {
+        subtitle.push(Span::styled(
+            format!(" · reminder {}", reminder.format("%H:%M")),
+            Style::default().fg(theme.warn),
+        ));
+    }
     lines.push(Line::from(subtitle));
 
     if !habit.tags.is_empty() {

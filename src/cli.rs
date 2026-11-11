@@ -60,6 +60,9 @@ pub enum Command {
         /// Description to attach
         #[arg(long = "description", visible_alias = "note", value_name = "TEXT")]
         description: Option<String>,
+        /// Daily reminder time, 24-hour HH:MM (opt-in)
+        #[arg(long, value_name = "HH:MM")]
+        remind: Option<String>,
     },
     /// Check a habit off
     Done {
@@ -179,12 +182,44 @@ pub enum Command {
     Path,
     /// Notify about habits that are still open today
     Remind {
+        /// Only habits whose reminder is this time (HH:MM)
+        #[arg(long, value_name = "HH:MM")]
+        at: Option<String>,
         /// Print the reminder instead of sending a desktop notification
         #[arg(long)]
         dry_run: bool,
         /// Notify even when nothing is due
         #[arg(long)]
         always: bool,
+    },
+    /// Generate a self-contained monthly HTML report
+    Report {
+        /// Month as YYYY-MM (defaults to the current month)
+        #[arg(long, value_name = "YYYY-MM", conflicts_with = "last_month")]
+        month: Option<String>,
+        /// Report on the previous calendar month
+        #[arg(long)]
+        last_month: bool,
+        /// Write here instead of the data file's reports directory
+        #[arg(long, value_name = "FILE")]
+        output: Option<std::path::PathBuf>,
+        /// Open the report when it is written
+        #[arg(long)]
+        open: bool,
+        /// Notify with the path (used by the scheduled job)
+        #[arg(long)]
+        notify: bool,
+    },
+    /// Set, show or clear a habit's daily reminder time
+    RemindTime {
+        /// Habit id or name (a unique prefix works)
+        habit: String,
+        /// 24-hour HH:MM; omit to print the current time
+        #[arg(value_name = "HH:MM")]
+        time: Option<String>,
+        /// Turn reminders off for this habit
+        #[arg(long, conflicts_with = "time")]
+        clear: bool,
     },
     /// Install a daily reminder with launchd (macOS) or systemd (Linux)
     Schedule {
@@ -199,8 +234,34 @@ pub enum Command {
 
 #[derive(Debug, Subcommand)]
 pub enum ScheduleAction {
-    /// Install or replace the daily reminder
+    /// Install or refresh one daily job per habit reminder time
     Install {
+        /// Print the unit files instead of installing them
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Stop and delete every reminder job
+    Remove {
+        /// Print what would be removed without touching anything
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Show whether reminders are installed
+    Status,
+    /// Schedule the monthly HTML report
+    Reports {
+        #[command(subcommand)]
+        action: ReportScheduleAction,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ReportScheduleAction {
+    /// Install or replace the monthly report job
+    Install {
+        /// Day of the month (1-28, so every month has it)
+        #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u8).range(1..=28))]
+        day: u8,
         /// Time of day, 24-hour HH:MM
         #[arg(long, default_value = "09:00", value_name = "HH:MM")]
         at: String,
@@ -208,13 +269,13 @@ pub enum ScheduleAction {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Stop and delete the scheduled reminder
+    /// Stop and delete the monthly report job
     Remove {
         /// Print what would be removed without touching anything
         #[arg(long)]
         dry_run: bool,
     },
-    /// Show whether a reminder is installed
+    /// Show whether the monthly report job is installed
     Status,
 }
 
@@ -234,11 +295,14 @@ pub fn run(
             ends,
             tags,
             description,
+            remind,
         } => {
             let schedule = parse_schedule(weekly, days)?;
+            let reminder = remind.as_deref().map(parse_time).transpose()?;
             let start = start.unwrap_or(today);
             let index =
                 data.add_habit_full(&name, schedule, start, ends, &tags, description.as_deref())?;
+            data.habits[index].reminder = reminder;
             let habit = &data.habits[index];
             store.save(data)?;
             println!(
@@ -250,6 +314,10 @@ pub fn run(
             );
             if !habit.tags.is_empty() {
                 println!("  tags {}", tags_line(habit));
+            }
+            if let Some(time) = reminder {
+                println!("  reminder {}", time.format("%H:%M"));
+                print_reminder_guidance();
             }
         }
         Command::Done { habit, date } => {
@@ -452,8 +520,37 @@ pub fn run(
             println!("deleted {name} and {check_ins} check-ins");
         }
         Command::Path => println!("{}", store.path().display()),
-        Command::Remind { dry_run, always } => remind(data, today, config, dry_run, always)?,
-        Command::Schedule { action } => schedule(store, action)?,
+        Command::Remind {
+            at,
+            dry_run,
+            always,
+        } => {
+            let at = at.as_deref().map(parse_time).transpose()?;
+            remind(data, today, config, at, dry_run, always)?;
+        }
+        Command::Report {
+            month,
+            last_month,
+            output,
+            open,
+            notify,
+        } => report(
+            store,
+            data,
+            today,
+            config,
+            ReportOptions {
+                month,
+                last_month,
+                output,
+                open,
+                notify,
+            },
+        )?,
+        Command::RemindTime { habit, time, clear } => {
+            remind_time(store, data, today, &habit, time.as_deref(), clear)?
+        }
+        Command::Schedule { action } => schedule(store, data, today, action)?,
         Command::Config => {
             let path = Config::path();
             let state = match &path {
@@ -487,15 +584,84 @@ pub fn run(
     Ok(())
 }
 
+/// Everything the `report` command needs, so the signature stays readable.
+struct ReportOptions {
+    month: Option<String>,
+    last_month: bool,
+    output: Option<std::path::PathBuf>,
+    open: bool,
+    notify: bool,
+}
+
+fn report(
+    store: &Store,
+    data: &Data,
+    today: NaiveDate,
+    config: &Config,
+    options: ReportOptions,
+) -> Result<()> {
+    let anchor = if options.last_month {
+        crate::report::last_month(today)
+    } else if let Some(text) = options.month.as_deref() {
+        crate::report::month_start(text)?
+    } else {
+        today
+    };
+    let path = options
+        .output
+        .unwrap_or_else(|| crate::report::path_for(store.path(), anchor));
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating {}", parent.display()))?;
+    }
+    let html = crate::report::render(data, today, anchor, config.week_start);
+    std::fs::write(&path, html).with_context(|| format!("writing {}", path.display()))?;
+    println!("wrote {}", pretty(&path));
+    if options.notify {
+        let title = format!("Habit report · {}", anchor.format("%B %Y"));
+        let body = path.display().to_string();
+        if let Err(error) = reminders::notify(&title, &body, false) {
+            eprintln!("habit: report written, but the notification failed: {error:#}");
+        }
+    }
+    if options.open {
+        let command = if cfg!(target_os = "macos") {
+            "open"
+        } else if cfg!(target_os = "linux") {
+            "xdg-open"
+        } else {
+            bail!(
+                "no program known for opening files on this platform; open {} yourself",
+                path.display()
+            );
+        };
+        std::process::Command::new(command)
+            .arg(&path)
+            .status()
+            .with_context(|| format!("opening {}", path.display()))?;
+    }
+    Ok(())
+}
+
 fn remind(
     data: &Data,
     today: NaiveDate,
     config: &Config,
+    at: Option<NaiveTime>,
     dry_run: bool,
     always: bool,
 ) -> Result<()> {
-    let open = reminders::pending(data, today, config.week_start);
+    if !data.habits.iter().any(|habit| habit.reminder.is_some()) {
+        println!("no reminders set — give a habit one with `habit remind-time <habit> 09:00`");
+        return Ok(());
+    }
+
+    let open = reminders::pending(data, today, config.week_start, at);
     if open.is_empty() {
+        // A stale unit for a time no habit uses should stay quiet.
+        if at.is_some_and(|time| !data.habits.iter().any(|habit| habit.reminder == Some(time))) {
+            return Ok(());
+        }
         if always {
             let title = "habit · all clear";
             let body = "All habits are done for today";
@@ -517,71 +683,244 @@ fn remind(
     Ok(())
 }
 
-fn schedule(store: &Store, action: ScheduleAction) -> Result<()> {
+fn remind_time(
+    store: &Store,
+    data: &mut Data,
+    today: NaiveDate,
+    habit: &str,
+    time: Option<&str>,
+    clear: bool,
+) -> Result<()> {
+    let index = data.resolve_index(habit)?;
+    let name = data.habits[index].name.clone();
+
+    if clear {
+        if data.habits[index].reminder.take().is_none() {
+            println!("reminders are already off for {name}");
+            return Ok(());
+        }
+        store.save(data)?;
+        println!("reminders off for {name}");
+        refresh_reminders(data, today, store)?;
+        return Ok(());
+    }
+
+    let Some(raw) = time else {
+        match data.habits[index].reminder {
+            Some(at) => println!("{name} reminds at {}", at.format("%H:%M")),
+            None => println!("reminders are off for {name}"),
+        }
+        return Ok(());
+    };
+
+    let at = parse_time(raw)?;
+    data.habits[index].reminder = Some(at);
+    store.save(data)?;
+    println!("{name} reminds at {}", at.format("%H:%M"));
+    refresh_reminders(data, today, store)?;
+    Ok(())
+}
+
+fn refresh_reminders(data: &Data, today: NaiveDate, store: &Store) -> Result<()> {
+    if reminders::any_installed(reminders::platform(), &reminders::REMINDER_PREFIXES) {
+        let count = sync_reminders(data, today, store)?;
+        println!(
+            "schedule refreshed · {}",
+            crate::format::plural(count as u32, "time")
+        );
+    } else {
+        print_reminder_guidance();
+    }
+    Ok(())
+}
+
+fn print_reminder_guidance() {
+    println!("  notifications are opt-in: run `habit schedule install` to hand the daily");
+    println!("  check to launchd (macOS) or systemd (Linux); nothing runs in the meantime");
+}
+
+fn sync_reminders(data: &Data, today: NaiveDate, store: &Store) -> Result<usize> {
+    let platform = reminders::platform();
+    let program = std::env::current_exe().context("finding the habit binary")?;
+    let data_path =
+        std::path::absolute(store.path()).unwrap_or_else(|_| store.path().to_path_buf());
+    let times = reminders::times(data, today);
+    let units = reminders::reminder_units(platform, &program, &data_path, &times)?;
+    reminders::sync(platform, &units, &reminders::REMINDER_PREFIXES)?;
+    Ok(times.len())
+}
+
+/// Show paths under the home directory as `~/…`, like the docs do.
+fn pretty(path: &std::path::Path) -> String {
+    if let Some(home) = std::env::var_os("HOME")
+        && let Ok(rest) = path.strip_prefix(std::path::PathBuf::from(home))
+    {
+        return format!("~/{}", rest.display());
+    }
+    path.display().to_string()
+}
+
+fn print_units(units: &reminders::Units) {
+    for unit in &units.units {
+        println!("# {}", pretty(&unit.path));
+        print!("{}", unit.body);
+        if !unit.body.ends_with('\n') {
+            println!();
+        }
+    }
+}
+
+fn schedule(store: &Store, data: &Data, today: NaiveDate, action: ScheduleAction) -> Result<()> {
     let platform = reminders::platform();
     let program = std::env::current_exe().context("finding the habit binary")?;
     // launchd and systemd start with a minimal PATH, so the unit carries the
     // binary and the data file as absolute paths.
-    let data = std::path::absolute(store.path()).unwrap_or_else(|_| store.path().to_path_buf());
+    let data_path =
+        std::path::absolute(store.path()).unwrap_or_else(|_| store.path().to_path_buf());
 
     match action {
-        ScheduleAction::Install { at, dry_run } => {
-            let at = parse_time(&at)?;
-            let units = reminders::units(platform, &program, &data, at)?;
+        ScheduleAction::Install { dry_run } => {
+            let times = reminders::times(data, today);
+            let units = reminders::reminder_units(platform, &program, &data_path, &times)?;
             if dry_run {
-                for (path, body) in &units.files {
-                    println!("# {}", path.display());
-                    print!("{body}");
-                    if !body.ends_with('\n') {
-                        println!();
-                    }
+                if times.is_empty() {
+                    println!("no reminder times set — give a habit one with `habit remind-time`");
+                } else {
+                    print_units(&units);
                 }
                 return Ok(());
             }
-            let units = reminders::install(platform, &program, &data, at)?;
-            println!(
-                "reminder installed for {} · {}",
-                at.format("%H:%M"),
-                units.files[0].0.display()
-            );
-            println!("  `habit schedule remove` stops it");
+            let removed = reminders::sync(platform, &units, &reminders::REMINDER_PREFIXES)?;
+            for path in removed {
+                println!("removed stale {}", pretty(&path));
+            }
+            if times.is_empty() {
+                println!(
+                    "no reminders set — give a habit one with `habit remind-time <habit> 09:00`"
+                );
+            } else {
+                let labels = times
+                    .iter()
+                    .map(|time| time.format("%H:%M").to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                println!(
+                    "reminders installed for {labels} · {}",
+                    crate::format::plural(times.len() as u32, "time")
+                );
+                for unit in &units.units {
+                    println!("  {}", pretty(&unit.path));
+                }
+            }
         }
         ScheduleAction::Remove { dry_run } => {
             if dry_run {
-                for path in reminders::unit_paths(platform)? {
-                    println!("would remove {}", path.display());
+                for path in reminders::installed(platform, &reminders::REMINDER_PREFIXES)? {
+                    println!("would remove {}", pretty(&path));
                 }
                 return Ok(());
             }
-            let removed = reminders::remove(platform)?;
+            let removed = reminders::remove(platform, &reminders::REMINDER_PREFIXES)?;
             if removed.is_empty() {
                 println!("no scheduled reminder found");
             } else {
                 for path in removed {
-                    println!("removed {}", path.display());
+                    println!("removed {}", pretty(&path));
                 }
             }
         }
         ScheduleAction::Status => {
-            let rows = reminders::status(platform)?;
-            if rows.is_empty() {
+            if platform == reminders::Platform::Other {
                 println!(
                     "scheduling is not supported on this platform; run `habit remind` from cron"
                 );
                 return Ok(());
             }
-            for (path, written, live) in &rows {
+            let rows = reminders::status(platform, &reminders::REMINDER_PREFIXES)?;
+            if rows.is_empty() {
+                println!("no reminder jobs installed");
+                println!("`habit schedule install` sets them up from each habit's reminder time");
+            }
+            for (path, _, live) in &rows {
                 let state = if *live {
                     "loaded"
-                } else if *written {
-                    "written, not loaded"
                 } else {
-                    "not installed"
+                    "written, not loaded"
                 };
-                println!("{} {}", pad_right(state, 20), path.display());
+                println!("{} {}", pad_right(state, 20), pretty(path));
             }
-            if rows.iter().all(|(_, _, live)| !live) {
-                println!("`habit schedule install` sets up a daily reminder");
+        }
+        ScheduleAction::Reports { action } => {
+            schedule_reports(store, today, &program, &data_path, action)?;
+        }
+    }
+    Ok(())
+}
+
+fn schedule_reports(
+    store: &Store,
+    today: NaiveDate,
+    program: &std::path::Path,
+    data_path: &std::path::Path,
+    action: ReportScheduleAction,
+) -> Result<()> {
+    let platform = reminders::platform();
+    match action {
+        ReportScheduleAction::Install { day, at, dry_run } => {
+            let at = parse_time(&at)?;
+            let units = reminders::report_units(platform, program, data_path, day, at)?;
+            if dry_run {
+                print_units(&units);
+                return Ok(());
+            }
+            let removed = reminders::sync(platform, &units, &reminders::REPORT_PREFIXES)?;
+            for path in removed {
+                println!("removed stale {}", pretty(&path));
+            }
+            println!(
+                "monthly report scheduled for day {day} at {} · {}",
+                at.format("%H:%M"),
+                pretty(&crate::report::path_for(
+                    store.path(),
+                    crate::report::last_month(today)
+                ))
+            );
+        }
+        ReportScheduleAction::Remove { dry_run } => {
+            if dry_run {
+                for path in reminders::installed(platform, &reminders::REPORT_PREFIXES)? {
+                    println!("would remove {}", pretty(&path));
+                }
+                return Ok(());
+            }
+            let removed = reminders::remove(platform, &reminders::REPORT_PREFIXES)?;
+            if removed.is_empty() {
+                println!("no monthly report job found");
+            } else {
+                for path in removed {
+                    println!("removed {}", pretty(&path));
+                }
+            }
+        }
+        ReportScheduleAction::Status => {
+            if platform == reminders::Platform::Other {
+                println!(
+                    "scheduling is not supported on this platform; run `habit report --last-month` from cron"
+                );
+                return Ok(());
+            }
+            let rows = reminders::status(platform, &reminders::REPORT_PREFIXES)?;
+            if rows.is_empty() {
+                println!("no monthly report job installed");
+                println!("`habit schedule reports install` sets it up");
+            }
+            for (path, _, live) in &rows {
+                let state = if *live {
+                    "loaded"
+                } else {
+                    "written, not loaded"
+                };
+                println!("{} {}", pad_right(state, 20), pretty(path));
             }
         }
     }
@@ -916,6 +1255,7 @@ mod tests {
             ends: None,
             tags: Vec::new(),
             description: None,
+            remind: None,
         }
     }
 
@@ -1049,6 +1389,7 @@ mod tests {
                 ends: Some(date("2026-12-31")),
                 tags: vec!["Health".into(), "morning".into()],
                 description: Some("20 pages".into()),
+                remind: None,
             },
             &store,
             &mut data,

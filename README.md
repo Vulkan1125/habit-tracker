@@ -1,48 +1,14 @@
 # habit
 
 **A calm habit tracker for the terminal.** Streaks, weekly quotas, cheat days, tags, descriptions,
-dated notes and a heatmap — plus a plain JSON file you can read, diff and `grep`. One 2 MB Rust
-binary with no daemon, no account and no network access.
+dated notes, per-habit reminders, monthly HTML reports and a heatmap — plus a plain JSON file you
+can read, diff and `grep`. One 2 MB Rust binary with no daemon, no account and no network access.
 
 [![CI](https://github.com/Vulkan1125/habit-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/Vulkan1125/habit-tracker/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-edition%202024-orange.svg)](Cargo.toml)
 
-```
- habit  Tue 10 Nov 2026                                                            █████░ 3/4 today
-┌────────────────────────────────────────────┐┌ Details ───────────────────────────────────────────┐
-│ Habits 4   Tags 4   Archive 1              ││Morning run                                         │
-│▸ ● Morning run         daily        ○●◆○●●●││description:                                        │
-│  ● Read 20 pages       51d left     ●●●··●●││    5k before breakfast                             │
-│  ○ Strength            1/3 wk       ●·●··●·││    daily · since 2026-01-01                        │
-│  ● Meditate            daily        ●●●●●●●││    #health #morning                                │
-│  · Evening walk        daily        ○●●●●○◌││                                                    │
-│                                            ││streak     3 days   best 10 days                    │
-│                                            ││this week  ██████████  2/2                          │
-│                                            ││last 30d   █████████░  85% (24 of 28)               │
-│                                            ││                                                    │
-│                                            ││Mon ·████░██████████░██████████░██████████░███████  │
-│                                            ││Tue ·███████░██████████░██████████░██████████░████  │
-│                                            ││Wed ·██████████░██████████░██████████░██████████░   │
-│                                            ││Thu ███░██████████░██████████░██████████░████████   │
-│                                            ││Fri ██████░██████████░██████████░██████████░████◆   │
-│                                            ││Sat █████████░░█████████░██████████░██████████░█░   │
-│                                            ││Sun █░████████░█░██████████░██████████░██████████   │
-│                                            ││                                                    │
-│                                            ││● done  ◆ cheat  ░ missed  ◌ open  · not due        │
-│                                            ││282 check-ins  ◆ 2 cheat this Nov                   │
-│                                            ││                                                    │
-│                                            ││notes                                               │
-│                                            ││2026-11-10 easy recovery run after yesterday        │
-│                                            ││2026-11-09 legs heavy but went anyway               │
-│                                            ││2026-11-08 felt strong, 5k in 26:30                 │
-│                                            ││                                                    │
-└────────────────────────────────────────────┘└────────────────────────────────────────────────────┘
-space toggle · n note · tab pane · b bar · / filter · ? help · q quit
-```
-
-*(Colour is stripped in this capture. The real thing has seven palettes in light and dark mode and
-per-habit accents; borders stay square on purpose.)*
+![habit, the main screen: a habit list on the left, streaks, a heatmap and dated notes on the right](docs/screenshots/main-dark.png)
 
 ## Features
 
@@ -144,37 +110,14 @@ or finished ones. The Archive tab collects closed habits under **Archived** and 
 name is rewritten on every habit that carries it, and typing a name that is already in use asks
 whether to merge the two, so a typo cannot silently create a near-duplicate tag.
 
+![The Tags tab: each tag with its active-habit count, ready to open or rename](docs/screenshots/tags.png)
+
 Press `n` to write or edit a note — right after checking a habit off is the natural moment. The
 dialog opens on the day you are looking at (today unless you moved with `[` / `]`), and `tab` moves
 into its date field if you want another day: `↑` / `↓` step one day and typing takes any
 `YYYY-MM-DD`. A date in the future or before the habit started is refused with an inline message
 and the dialog stays open; `esc` cancels, and saving an empty note removes it. Dates are shown on
 the left, notes on the right, newest first.
-
-```
- habit  Tue 10 Nov 2026                                                            █████░ 3/4 today
-┌────────────────────────────────────────────┐┌ Details ───────────────────────────────────────────┐
-│ Habits 4   Tags 4   Archive 1              ││Morning run                                         │
-│ ‹ all tags   #health · 2 active            ││description:                                        │
-│▸ ● Morning run         daily        ○●◆○●●●││    5k before breakfast                             │
-│  ○ Strength            1/3 wk       ●·●··●·││    daily · since 2026-01-01                        │
-│   Archive                                  ││    #health #morning                                │
-│  · Evening walk        daily        ○●●●●○◌││                                                    │
-│                                            ││streak     3 days   best 10 days                    │
-│                                            ││this week  ██████████  2/2                          │
-│                                            ││last 30d   █████████░  85% (24 of 28)               │
-│                                            ││                                                    │
-│                                            ││Mon ·████░██████████░██████████░██████████░███████  │
-│                                            ││Tue ·███████░██████████░██████████░██████████░████  │
-│                                            ││Wed ·██████████░██████████░██████████░██████████░   │
-│                                            ││Thu ███░██████████░██████████░██████████░████████   │
-│                                            ││Fri ██████░██████████░██████████░██████████░████◆   │
-│                                            ││Sat █████████░░█████████░██████████░██████████░█░   │
-│                                            ││Sun █░████████░█░██████████░██████████░██████████   │
-│                                            ││                                                    │
-└────────────────────────────────────────────┘└────────────────────────────────────────────────────┘
-space toggle · n note · tab pane · b bar · / filter · ? help · q quit
-```
 
 In the TUI press `/` and type. `#health` matches tags, while plain words match the name, id, tags
 and description. Multiple tokens are ANDed, so `run #morning` narrows to morning runs.
@@ -198,19 +141,25 @@ and description. Multiple tokens are ANDed, so `run #morning` narrows to morning
   inside the dialog to file it under another date (never the future, never before the habit's
   start); empty input removes the note and edits are covered by undo.
 - **Hideable bottom bar**: `b` reclaims the hint line and gives the panes one more row.
-- **Add/edit dialog** with schedule picker, weekday toggles, start/end dates, tags and description —
-  all validated inline.
+- **Add/edit dialog** with schedule picker, weekday toggles, start/end dates, a reminder time, tags
+  and description — all validated inline. A time in **Remind** is what opts a habit into
+  notifications; leaving it empty keeps it silent.
 - **Instant feedback** in the status line, including streak effects and a warning when a second
   cheat in a month will break the run.
 - **One-step undo** for every mutation — check-off, cheat, add, edit, rename/merge a tag, archive
   and delete.
 - **Archive instead of delete**: history is kept, the habit leaves the Habits tab and `d` moves it
   between the Archive tab's **Archived** and **Ended** groups.
-- **Tag-aware filter** (`/`), **help overlay** (`?`), **reload from disk** (`r`).
+- **Tag-aware filter** (`/`), **help overlay** (`?`), **reload from disk** (`r`), and a one-time
+  **notification setup** prompt the first time a reminder is enabled.
 - **Theme switching without editing a file**: `T` steps through the seven palettes and `m` flips
   dark/light; both are written back to `config.toml` immediately.
 - **Responsive**: below 72 columns the detail pane collapses and the list takes the full width.
   Footer hints and the detail legend shorten themselves on narrow terminals.
+
+Closed habits keep their history and their detail pane:
+
+![The Archive tab, with archived habits above ended ones and a finished habit's frozen streak](docs/screenshots/archive.png)
 
 ### Themes, in light and dark
 
@@ -235,6 +184,10 @@ Colours are defined in truecolour and downgraded automatically to the 256-colour
 the nearest of the basic 16 colours when the terminal does not advertise better support (16-colour
 mode also leaves your background untouched). Each habit gets a stable accent derived from a hash
 of its id, so its colour survives sessions without being stored. `habit themes` lists the names.
+
+The same file in light mode, with `mode = "light"`:
+
+![The same screen in Catppuccin light mode](docs/screenshots/main-light.png)
 
 ### The CLI
 
@@ -280,27 +233,82 @@ Gym · 4×/week · since 2026-09-14
 - **Hand-editable**: plain, pretty-printed JSON, and `r` reloads it without restarting.
 - **Failed saves revert the change in memory**, so the screen never lies about what's on disk.
 
-### Native reminders, without a daemon
+### Per-habit reminders, without a daemon
+
+Reminders are **opt-in per habit**: nothing is scheduled until a habit gets a time. Set one in the
+add/edit dialog's **Remind** field, or from the shell:
+
+```sh
+habit add "Morning run" --remind 06:30
+habit remind-time gym 18:00     # set or change a habit's time
+habit remind-time gym           # print the current time
+habit remind-time gym --clear   # turn it off
+```
 
 `habit remind` is a single process: it reads the file, works out what is still open — quota habits
-only nudge while their week is short, and excused or finished days are skipped — then asks the
-desktop for a notification. On macOS that is `osascript`, on Linux `notify-send`; elsewhere it
-prints the text. Nothing stays running, and no network is involved.
+only nudge while their week is short, and done, excused and finished days are skipped — then asks
+the desktop for a notification. On macOS that is `osascript`, on Linux `notify-send`; elsewhere it
+prints the text. Nothing stays running, and no network is involved. `--at HH:MM` limits a run to
+the habits with that time, which is how one OS job per time shares the command.
 
-To run it daily, hand it to the OS scheduler:
+The first time a reminder is switched on, the TUI explains the one-time setup and offers to install
+it; choosing **later** keeps the time saved but silent, so no scheduler job is created without your
+say-so.
+
+![The one-time notification setup, shown when a habit gets its first reminder](docs/screenshots/reminders.png)
+
+The OS scheduler does the waking:
 
 ```
-$ habit schedule install --at 09:00
-reminder installed for 09:00 · ~/Library/LaunchAgents/com.habit.reminder.plist
+$ habit schedule install
+reminders installed for 06:30, 18:00, 19:30 · 3 times
+  ~/Library/LaunchAgents/com.habit.reminder.0630.plist
+  ~/Library/LaunchAgents/com.habit.reminder.1800.plist
+  ~/Library/LaunchAgents/com.habit.reminder.1930.plist
 $ habit schedule status
-loaded               ~/Library/LaunchAgents/com.habit.reminder.plist
+loaded               ~/Library/LaunchAgents/com.habit.reminder.0630.plist
+loaded               ~/Library/LaunchAgents/com.habit.reminder.1800.plist
+loaded               ~/Library/LaunchAgents/com.habit.reminder.1930.plist
 $ habit schedule remove
 ```
 
-macOS gets a launchd agent; Linux gets a `habit-reminder.service` plus `.timer` pair in
-`~/.config/systemd/user`. Both units carry the absolute binary and data path, so a minimal
-scheduler `PATH` does not matter. `--dry-run` prints the unit or the reminder text without
-touching the system, and scheduling is entirely opt-in: the data file and config are unchanged.
+macOS gets one launchd agent per distinct reminder time; Linux gets a
+`habit-reminder-HHMM.service` plus `.timer` pair in `~/.config/systemd/user`. Both units carry the
+absolute binary and data path, so a minimal scheduler `PATH` does not matter. Re-running `install`
+syncs: it writes a unit for each time in use and removes units for times no habit uses any more,
+including the single-unit names from 0.6.0. `--dry-run` prints the files without touching the
+system. macOS may ask for notification permission the first time a notification is posted — allow
+it once, and the rest arrive quietly.
+
+### Monthly HTML reports
+
+`habit report` writes one self-contained page per month — inline CSS, no scripts, no fonts to
+download and no network — to `<data dir>/reports/habit-YYYY-MM.html`:
+
+```sh
+habit report                    # this month, on demand
+habit report --month 2026-10
+habit report --last-month --open
+habit report --output ~/Desktop/habits.html
+```
+
+Every habit gets its completion rate, quota weeks met, current streak, excused days and a day-by-day
+calendar using the same four statuses as the TUI. It reads well in a browser, prints cleanly, and
+can be committed, attached to a mail or turned into a PDF.
+
+![The monthly HTML report, one card per habit](docs/screenshots/report.png)
+
+To have it happen by itself, schedule it:
+
+```sh
+habit schedule reports install              # day 1 at 09:00
+habit schedule reports install --day 7 --at 18:00
+habit schedule reports status
+habit schedule reports remove
+```
+
+The job runs `habit report --last-month --notify`: on the chosen day you get last month's page and a
+notification carrying its path. The day must be 1–28 so every month has it; the default is the 1st.
 
 ### Small on purpose
 
@@ -387,10 +395,11 @@ macOS and Linux. Windows terminals are supported by crossterm but untested here.
 ## Quick start
 
 ```sh
-habit add "Gym" --weekly 4 --tag health
+habit add "Gym" --weekly 4 --tag health --remind 18:00
 habit add "Read 20 pages" --days mon,tue,wed,thu,fri --start 2026-11-01 --end 2026-12-31
 habit add "Meditate" --description "10 minutes is enough"
 habit                      # open the TUI, press a / space / c / [ ] / q
+habit schedule install     # once, to hand the reminder times to the OS
 ```
 
 Nothing else to configure. The data file is created on the first change.
@@ -435,66 +444,18 @@ Nothing else to configure. The data file is created on the first change.
 | `m` | switch dark / light mode (saved) |
 | `?` | help overlay |
 | `q`, `esc` | quit — `esc` first clears a filter, then backs out of a tag view or another tab |
+| `y` / `n` | in the notification setup prompt: install the schedule now / keep it silent for now |
 
 In the add/edit dialog: `tab` / `shift-tab` moves between fields, `←→` changes the schedule kind,
 `space` toggles a weekday, `enter` saves, `esc` cancels. The fields are name, schedule, weekday
-selection, weekly quota, start date, end date, tags and description.
+selection, weekly quota, start date, end date, reminder time, tags and description; leave
+**Remind** empty to keep notifications off.
 
-<details>
-<summary>Add/edit dialog</summary>
+![The add/edit dialog, with start, end and reminder fields](docs/screenshots/form.png)
 
-```
-┌ New habit ─────────────────────────────────────────────────┐
-│Name        Journal                                         │
-│Schedule    chosen days                                     │
-│Days        Mon Tue Wed Thu Fri Sat Sun                     │
-│Per week     3  (switch schedule to use)                    │
-│Starts      2026-11-10                                      │
-│Ends        never                                           │
-│Tags        health, morning                                 │
-│Description optional                                        │
-│                                                            │
-│  save                                                      │
-│tab next · arrows change · enter save · esc cancel          │
-└────────────────────────────────────────────────────────────┘
-```
+The help overlay lists every key:
 
-</details>
-
-<details>
-<summary>Help overlay (<code>?</code>)</summary>
-
-```
-┌ Keys ────────────────────────────────────────────┐
-│habit  terminal habit tracker                     │
-│                                                  │
-│space       check off / undo the selected day     │
-│tab         switch habits / tags / archive        │
-│n           note for a chosen day                 │
-│b           show / hide the bottom bar            │
-│c           cheat day (one per month)             │
-│[ ]         previous / next day                   │
-│t           back to today                         │
-│j k ↑ ↓     move                                  │
-│g G         first / last                          │
-│a           add a habit                           │
-│e           edit a habit · rename a tag           │
-│d           archive or restore                    │
-│x           delete (asks first)                   │
-│u           undo the last change                  │
-│/           filter by text, tag or #tag           │
-│T           next colour theme                     │
-│m           dark / light mode                     │
-│r           reload the file from disk             │
-│?           this help                             │
-│esc         back out / quit                       │
-│q           quit                                  │
-│                                                  │
-│any key closes this                               │
-└──────────────────────────────────────────────────┘
-```
-
-</details>
+![The help overlay](docs/screenshots/help.png)
 
 ## CLI reference
 
@@ -508,7 +469,7 @@ Global flags, usable before or after the subcommand:
 | Command | Arguments | What it does |
 | --- | --- | --- |
 | `habit` | | open the TUI |
-| `habit add <NAME>` | `--weekly N` / `-w N`, `--days mon,wed`, `--start D`, `--end D`, `--tag TAG` (repeatable), `--description TEXT` (`--note` still works) | create a habit; defaults to daily, starting today |
+| `habit add <NAME>` | `--weekly N` / `-w N`, `--days mon,wed`, `--start D`, `--end D`, `--tag TAG` (repeatable), `--description TEXT` (`--note` still works), `--remind HH:MM` | create a habit; defaults to daily, starting today, no reminder |
 | `habit done <HABIT>` | `--date YYYY-MM-DD` | check off today or backfill a day |
 | `habit undo <HABIT>` | `--date YYYY-MM-DD` | un-check a day |
 | `habit cheat <HABIT>` | `--date YYYY-MM-DD`, `--off` | mark or remove an excused day |
@@ -524,10 +485,15 @@ Global flags, usable before or after the subcommand:
 | `habit end <HABIT>` | `--date D`, `--clear` | set or clear the inclusive end date |
 | `habit archive <HABIT>` | | toggle archived (history kept) |
 | `habit remove <HABIT>` | `--force` | delete habit and history; refuses without `--force` |
-| `habit remind` | `--dry-run`, `--always` | notify about habits still open today |
-| `habit schedule install` | `--at HH:MM` (default 09:00), `--dry-run` | install a daily reminder with launchd or systemd |
-| `habit schedule remove` | `--dry-run` | stop and delete the scheduled reminder |
-| `habit schedule status` | | show whether the reminder is installed and loaded |
+| `habit remind` | `--at HH:MM`, `--dry-run`, `--always` | notify about habits still open today (all times, or just one) |
+| `habit remind-time <HABIT> [HH:MM]` | `--clear` | set, print or clear one habit's reminder time |
+| `habit report` | `--month YYYY-MM`, `--last-month`, `--output FILE`, `--open`, `--notify` | write a monthly HTML report |
+| `habit schedule install` | `--dry-run` | one OS job per habit reminder time (launchd or systemd) |
+| `habit schedule remove` | `--dry-run` | stop and delete every reminder job |
+| `habit schedule status` | | show whether the reminder jobs are installed and loaded |
+| `habit schedule reports install` | `--day 1-28` (default 1), `--at HH:MM`, `--dry-run` | schedule the monthly report |
+| `habit schedule reports remove` | `--dry-run` | stop and delete the monthly report job |
+| `habit schedule reports status` | | show whether the report job is installed and loaded |
 | `habit path` | | print the data file path |
 | `habit config` | | print effective config, data path, theme and mode |
 | `habit themes` | | list the palettes |
@@ -583,12 +549,12 @@ Resolution order for the data file:
 3. `$XDG_DATA_HOME/habit/data.json` (only if absolute)
 4. `$HOME/.local/share/habit/data.json`
 
-Format (version 3) — habits carry their window and metadata; `log` and `cheats` are parallel maps
-from date to habit ids, and `notes` maps a date to that habit's journal entry:
+Format (version 4) — habits carry their window, reminder and metadata; `log` and `cheats` are
+parallel maps from date to habit ids, and `notes` maps a date to that habit's journal entry:
 
 ```json
 {
-  "version": 3,
+  "version": 4,
   "habits": [
     {
       "id": "gym",
@@ -597,6 +563,7 @@ from date to habit ids, and `notes` maps a date to that habit's journal entry:
       "created": "2026-09-14",
       "tags": ["health"],
       "note": "ten minutes is enough",
+      "reminder": "06:30",
       "notes": {
         "2026-11-09": "legs heavy but went anyway",
         "2026-11-10": "easy recovery run"
@@ -622,14 +589,15 @@ from date to habit ids, and `notes` maps a date to that habit's journal entry:
 ```
 
 Ids are slugified from the name (`Morning Walk!` → `morning-walk`) and suffixed on collision
-(`morning-walk-2`). Optional fields (`ends`, `archived`, `note`, `tags`, `notes`) are omitted when
-empty. The `note` field is the habit's description; dated entries live under `notes`.
+(`morning-walk-2`). Optional fields (`ends`, `archived`, `note`, `reminder`, `tags`, `notes`) are
+omitted when empty, so a habit without a reminder keeps the old shape. The `note` field is the
+habit's description; dated entries live under `notes`.
 The first cheat for a habit in a calendar month is the excused one; the map itself stores every
 marked day so the UI can show and explain the second.
 
 **Editing by hand is supported**: keep it valid JSON, then press `r` in the TUI or just run another
-command. Empty or whitespace-only files are treated as “no data”. Older (version 1 or 2) files
-load with the new fields defaulted and are written back as version 3.
+command. Empty or whitespace-only files are treated as “no data”. Older (version 1, 2 or 3) files
+load with the new fields defaulted and are written back as version 4.
 
 ## Configuration
 
@@ -668,6 +636,9 @@ habit cheat gym --date 2026-11-06
 
 # commit your history alongside your data
 cp "$(habit path)" ~/notes/habits-$(date +%F).json
+
+# a monthly page you can keep or print
+habit report --last-month --open
 ```
 
 A habit can be checked off from anywhere a shell can run, which means cron, `launchd`, git hooks or
@@ -680,6 +651,8 @@ src/
   model.rs    habits, schedules, log, cheats, JSON shape, tags, id slugs
   store.rs    path resolution, atomic load/save, format version and upgrade
   stats.rs    streaks, completion, heatmap — pure functions
+  reminders.rs  what is due, notification text, launchd/systemd unit files
+  report.rs   monthly stats and the self-contained HTML page
   app.rs      TUI state, date navigation, key handling, persist-on-change, undo
   cli.rs      subcommands and their text output
   config.rs   config.toml
@@ -709,7 +682,7 @@ A few decisions worth knowing:
 ## Development
 
 ```sh
-cargo test                                  # 156 tests
+cargo test                                  # 192 tests
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 cargo build --release
@@ -728,13 +701,15 @@ several widths and in the overlays.
 
 `0.2.0` shipped the six features planned for it — start/end dates, monthly cheat days, notes, tags
 and filtering, a detail-pane trend graph and the visual/theming pass. Later releases added dated
-notes, the Tags tab, tag rename/merge, the Archive tab and opt-in native reminders; the trend line
-itself went away in `0.3.0`, leaving the adaptive heatmap. **[ROADMAP.md](ROADMAP.md)** keeps the original design notes and decisions.
+notes, the Tags tab, tag rename/merge, the Archive tab and opt-in native reminders; `0.7.0` added
+per-habit reminder times with a first-run setup prompt and monthly HTML reports. The trend line
+itself went away in `0.3.0`, leaving the adaptive heatmap. **[ROADMAP.md](ROADMAP.md)** keeps the
+original design notes and decisions.
 
 Ideas still on the table, roughly in order:
 
 - A quota bar chart and richer multi-tag views.
-- Import/export helpers (CSV, old `data.json`) and a monthly HTML report.
+- Import/export helpers (CSV, old `data.json`).
 - Windows CI.
 
 Not planned: accounts, sync, telemetry, plugins, a server.

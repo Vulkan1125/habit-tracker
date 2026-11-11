@@ -6,7 +6,8 @@ implementation differs from the sketch. Open work moved to [Carried over](#carri
 
 Every feature keeps the two rules that make the project what it is: **one plain JSON file** and
 **no daemon, account or network**. The Archive tab, the **Starting later** heading and native
-reminders shipped in 0.6.0; the reminders hand a daily run to launchd/systemd rather than living
+reminders shipped in 0.6.0. 0.7.0 made reminders per-habit with one OS job per time and added
+monthly HTML reports; the reminders still hand each run to launchd/systemd rather than living
 inside the app.
 
 ## How the pieces fit together
@@ -254,9 +255,12 @@ beyond palette tables.
 
 - A quota bar chart and richer multi-tag views.
 - Optional reminders/notifications — **shipped in 0.6.0** as `habit remind` plus `habit schedule
-  install`, which writes a launchd agent or systemd user timer. Still no daemon and still opt-in,
-  exactly as sketched here.
-- Import/export helpers (CSV, and reading a previous `data.json`) and a monthly HTML report.
+  install`, which writes a launchd agent or systemd user timer. 0.7.0 added per-habit reminder
+  times, one job per distinct time, and a first-run setup prompt. Still no daemon and still
+  opt-in, exactly as sketched here.
+- A monthly HTML report — **shipped in 0.7.0** as `habit report` plus `habit schedule reports
+  install`. One self-contained page per month, on demand or on a chosen day.
+- Import/export helpers (CSV, and reading a previous `data.json`).
 - Windows CI.
 
 ## Non-goals
@@ -275,6 +279,7 @@ file, drop the fields it does not know about on the next save, and lose data qui
 that old build refuses the file with a clear error instead, and the original is still on disk as
 `data.json.bak`.
 
-Implemented in 0.2.0 and extended in 0.3.0: an older file loads with defaults for the new fields and
-is stamped as the current version on the next save, while a future version is refused. Every feature lands with tests in
+Implemented in 0.2.0 and extended in 0.3.0, 0.6.0 and 0.7.0 (format 4 added `reminder`): an older
+file loads with defaults for the new fields and is stamped as the current version on the next save,
+while a future version is refused. Every feature lands with tests in
 `stats.rs` (or wherever the logic belongs) and, where it renders, a `TestBackend` frame test.

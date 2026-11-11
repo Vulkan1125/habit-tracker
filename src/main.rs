@@ -8,6 +8,7 @@ mod config;
 mod format;
 mod model;
 mod reminders;
+mod report;
 mod stats;
 mod store;
 mod theme;

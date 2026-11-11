@@ -5,6 +5,9 @@ pub mod form;
 pub mod help;
 pub mod list;
 
+#[cfg(test)]
+mod screenshots;
+
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -53,6 +56,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Mode::Confirm(confirm) => confirm_overlay(frame, area, &theme, confirm),
         Mode::Note(entry) => note_overlay(frame, area, &theme, entry),
         Mode::Tag(entry) => tag_overlay(frame, area, &theme, entry),
+        Mode::ReminderSetup => reminder_setup_overlay(frame, area, &theme),
     }
 }
 
@@ -147,6 +151,7 @@ fn hint(app: &App, max_width: usize) -> String {
         Mode::Confirm(_) => "y confirm · n cancel".to_string(),
         Mode::Note(_) => "tab date/note · ↑↓ day · enter save · esc cancel".to_string(),
         Mode::Tag(_) => "enter rename · esc cancel · an existing name merges".to_string(),
+        Mode::ReminderSetup => "y install now · n later".to_string(),
         Mode::Normal if app.filtering => {
             "type to filter · #tag for tags · enter keep · esc clear".to_string()
         }
@@ -173,6 +178,71 @@ fn hint(app: &App, max_width: usize) -> String {
             "space · n · b · / · ? · q".to_string()
         }
     }
+}
+
+fn reminder_setup_overlay(frame: &mut Frame, area: Rect, theme: &Theme) {
+    let width = area.width.saturating_sub(4).clamp(44, 76);
+    let height = 11.min(area.height);
+    let popup = Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+    frame.render_widget(Clear, popup);
+    let block = Block::bordered()
+        .title(" Notifications ")
+        .border_style(Style::default().fg(theme.accent))
+        .style(theme.base());
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    let room = inner.width as usize;
+    let lines = vec![
+        Line::from(Span::styled(
+            "Notifications need a one-time setup.",
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::raw(""),
+        Line::from(Span::styled(
+            truncate(
+                "habit hands one small daily job to launchd (macOS) or systemd (Linux).",
+                room,
+            ),
+            Style::default().fg(theme.fg),
+        )),
+        Line::from(Span::styled(
+            truncate(
+                "The app itself never runs in the background; it wakes once per reminder.",
+                room,
+            ),
+            Style::default().fg(theme.dim),
+        )),
+        Line::raw(""),
+        Line::from(Span::styled(
+            truncate(
+                "macOS may ask for notification permission the first time — allow it.",
+                room,
+            ),
+            Style::default().fg(theme.warn),
+        )),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled(
+                "y",
+                Style::default().fg(theme.done).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" install now    "),
+            Span::styled(
+                "n",
+                Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" later (saved, but silent)"),
+        ]),
+    ];
+    frame.render_widget(Paragraph::new(lines).style(theme.base()), inner);
 }
 
 fn note_overlay(frame: &mut Frame, area: Rect, theme: &Theme, entry: &crate::app::NoteEntry) {
@@ -361,7 +431,7 @@ mod tests {
     use crate::config::Config;
     use crate::model::{Data, Schedule};
     use crate::store::Store;
-    use chrono::NaiveDate;
+    use chrono::{NaiveDate, NaiveTime};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
@@ -680,7 +750,26 @@ mod tests {
         assert!(screen.contains("New habit"), "{screen}");
         assert!(screen.contains("Schedule"), "{screen}");
         assert!(screen.contains("Tags"), "{screen}");
+        assert!(screen.contains("Remind"), "{screen}");
         assert!(screen.contains("Description"), "{screen}");
+    }
+
+    #[test]
+    fn the_reminder_setup_explains_the_one_time_setup() {
+        let mut app = app_with("Gym");
+        app.mode = Mode::ReminderSetup;
+        let screen = render(&mut app, 100, 30);
+        assert!(screen.contains("one-time setup"), "{screen}");
+        assert!(screen.contains("never runs in the background"), "{screen}");
+        assert!(screen.contains("install now"), "{screen}");
+    }
+
+    #[test]
+    fn a_reminder_time_is_shown_in_the_details() {
+        let mut app = app_with("Gym");
+        app.data.habits[0].reminder = Some(NaiveTime::from_hms_opt(9, 0, 0).unwrap());
+        let screen = render(&mut app, 90, 30);
+        assert!(screen.contains("reminder 09:00"), "{screen}");
     }
 
     #[test]

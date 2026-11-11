@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::{NaiveDate, NaiveDateTime};
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
@@ -13,6 +13,7 @@ use ratatui::widgets::ListState;
 
 use crate::config::Config;
 use crate::model::{Data, Day, Habit, TagError};
+use crate::reminders;
 use crate::stats;
 use crate::store::Store;
 use crate::theme::{ColorMode, Theme, ThemeName};
@@ -32,6 +33,8 @@ pub enum Mode {
     Form(Box<Form>),
     Note(NoteEntry),
     Tag(TagEntry),
+    /// The one-time explanation shown when reminders are first enabled.
+    ReminderSetup,
 }
 
 /// The rename prompt, opened from the tags tab.
@@ -703,6 +706,11 @@ impl App {
                 }
                 Ok(())
             }
+            Mode::ReminderSetup => {
+                let install = matches!(key.code, KeyCode::Char('y') | KeyCode::Char('Y'));
+                self.finish_reminder_setup(install);
+                Ok(())
+            }
         }
     }
 
@@ -1041,7 +1049,56 @@ impl App {
         self.flash_ok(format!("deleted {name} · u undoes"));
     }
 
+    /// Called after a form save: keep installed units in step, or explain the
+    /// one-time setup the first time a reminder is switched on.
+    fn after_reminder_change(&mut self, newly_enabled: bool) {
+        let installed =
+            reminders::any_installed(reminders::platform(), &reminders::REMINDER_PREFIXES);
+        if installed {
+            match self.sync_reminders() {
+                Ok(count) => self.flash_ok(format!(
+                    "reminders scheduled · {}",
+                    crate::format::plural(count as u32, "time")
+                )),
+                Err(error) => {
+                    self.flash_warning(format!("reminder saved, but scheduling failed: {error:#}"))
+                }
+            }
+        } else if newly_enabled {
+            self.mode = Mode::ReminderSetup;
+        }
+    }
+
+    fn sync_reminders(&mut self) -> Result<usize> {
+        let platform = reminders::platform();
+        let times = reminders::times(&self.data, self.today);
+        let program = std::env::current_exe().context("finding the habit binary")?;
+        let data = std::path::absolute(self.store.path())
+            .unwrap_or_else(|_| self.store.path().to_path_buf());
+        let units = reminders::reminder_units(platform, &program, &data, &times)?;
+        reminders::sync(platform, &units, &reminders::REMINDER_PREFIXES)?;
+        Ok(times.len())
+    }
+
+    fn finish_reminder_setup(&mut self, install: bool) {
+        if install {
+            match self.sync_reminders() {
+                Ok(0) => self.flash_warning("no reminder times to schedule".into()),
+                Ok(count) => self.flash_ok(format!(
+                    "reminders scheduled · {}",
+                    crate::format::plural(count as u32, "time")
+                )),
+                Err(error) => self.flash_err(format!("could not schedule: {error:#}")),
+            }
+        } else {
+            self.flash_warning(
+                "reminder saved · run `habit schedule install` to turn notifications on".into(),
+            );
+        }
+    }
+
     fn submit_form(&mut self, original: Option<String>, draft: crate::ui::form::Draft) {
+        let reminder = draft.reminder;
         if let Err(error) = draft.schedule.validate() {
             self.flash_err(error.to_string());
             return;
@@ -1061,12 +1118,14 @@ impl App {
                     self.flash_err(format!("a habit named \"{}\" already exists", other.name));
                     return;
                 }
+                let was_enabled = self.data.habits[index].reminder.is_some();
                 let mut updated = self.data.habits[index].clone();
                 updated.name = draft.name.clone();
                 updated.schedule = draft.schedule;
                 updated.created = draft.start;
                 updated.ends = draft.ends;
                 updated.note = draft.note;
+                updated.reminder = reminder;
                 updated.tags = draft.tags;
                 if let Err(error) = updated.validate() {
                     self.flash_err(error.to_string());
@@ -1079,6 +1138,7 @@ impl App {
                     }
                 });
                 self.flash_ok(format!("updated {display}"));
+                self.after_reminder_change(!was_enabled && reminder.is_some());
             }
             None => {
                 let before = self.data.clone();
@@ -1091,6 +1151,7 @@ impl App {
                     draft.note.as_deref(),
                 ) {
                     Ok(index) => {
+                        self.data.habits[index].reminder = reminder;
                         let id = self.data.habits[index].id.clone();
                         let display = self.data.habits[index].name.clone();
                         if self.commit(before) {
@@ -1102,6 +1163,7 @@ impl App {
                                 self.cursor = position;
                             }
                             self.flash_ok(format!("added {display} · space checks off"));
+                            self.after_reminder_change(reminder.is_some());
                         }
                     }
                     Err(error) => {
@@ -1503,6 +1565,23 @@ mod tests {
             vec![ListRow::Heading("Starting later"), ListRow::Habit(1)]
         );
         assert_eq!(app.visible_indices(), vec![1]);
+    }
+
+    #[test]
+    fn choosing_later_keeps_the_reminder_and_explains_the_schedule_command() {
+        let mut app = app();
+        app.data.habits[0].reminder = Some(chrono::NaiveTime::from_hms_opt(9, 0, 0).unwrap());
+        app.mode = Mode::ReminderSetup;
+        press(&mut app, KeyCode::Char('n'));
+        assert!(matches!(app.mode, Mode::Normal));
+        assert!(app.data.habits[0].reminder.is_some());
+        assert!(
+            app.flash
+                .as_ref()
+                .is_some_and(|flash| flash.text.contains("habit schedule install")),
+            "{:?}",
+            app.flash.as_ref().map(|flash| &flash.text)
+        );
     }
 
     #[test]

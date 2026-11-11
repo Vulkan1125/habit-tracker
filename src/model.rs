@@ -4,12 +4,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use anyhow::{Result, bail};
-use chrono::{Datelike, Duration, NaiveDate, Weekday};
+use chrono::{Datelike, Duration, NaiveDate, NaiveTime, Weekday};
 use serde::{Deserialize, Serialize};
 
 /// Bumped whenever the on-disk shape changes, so an older build refuses the file
 /// instead of silently dropping fields it does not know about.
-pub const DATA_VERSION: u32 = 3;
+pub const DATA_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Day {
@@ -160,11 +160,53 @@ pub struct Habit {
     pub archived: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// Local time for a daily reminder, or `None` when reminders are off.
+    ///
+    /// Reminders are opt-in per habit: nothing is scheduled until a time is set.
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "clock")]
+    pub reminder: Option<NaiveTime>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
     /// Dated journal entries, one per day, newest first when iterated in reverse.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub notes: BTreeMap<NaiveDate, String>,
+}
+
+/// Store a reminder as `HH:MM` rather than chrono's `HH:MM:SS`, because the
+/// file is meant to be read and edited by hand.
+mod clock {
+    use chrono::{NaiveTime, Timelike};
+    use serde::de::Error as _;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(time: &Option<NaiveTime>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match time {
+            Some(time) => {
+                serializer.serialize_str(&format!("{:02}:{:02}", time.hour(), time.minute()))
+            }
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<NaiveTime>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let Some(raw) = Option::<String>::deserialize(deserializer)? else {
+            return Ok(None);
+        };
+        for format in ["%H:%M", "%H:%M:%S"] {
+            if let Ok(time) = NaiveTime::parse_from_str(raw.trim(), format) {
+                return Ok(Some(time));
+            }
+        }
+        Err(D::Error::custom(format!(
+            "reminder must be a 24-hour time like 09:00, found \"{raw}\""
+        )))
+    }
 }
 
 fn is_false(value: &bool) -> bool {
@@ -181,6 +223,7 @@ impl Habit {
             ends: None,
             archived: false,
             note: None,
+            reminder: None,
             tags: Vec::new(),
             notes: BTreeMap::new(),
         }
@@ -1082,6 +1125,28 @@ mod tests {
         assert!(habit.set_note(date("2026-11-09"), "   "));
         assert_eq!(habit.note_on(date("2026-11-09")), None);
         assert!(habit.notes.contains_key(&date("2026-11-10")));
+    }
+
+    #[test]
+    fn a_reminder_is_written_as_hh_mm_and_reads_both_spellings() {
+        let mut habit = Habit::new(
+            "gym".into(),
+            "Gym".into(),
+            Schedule::Daily,
+            date("2026-11-01"),
+        );
+        habit.reminder = NaiveTime::parse_from_str("07:05", "%H:%M").ok();
+        let json = serde_json::to_string(&habit).unwrap();
+        assert!(json.contains("\"reminder\":\"07:05\""), "{json}");
+        let back: Habit = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.reminder, habit.reminder);
+
+        let hand = json.replace("07:05", "07:05:00");
+        let back: Habit = serde_json::from_str(&hand).unwrap();
+        assert_eq!(back.reminder, habit.reminder);
+
+        let bad = json.replace("07:05", "7 o'clock");
+        assert!(serde_json::from_str::<Habit>(&bad).is_err());
     }
 
     #[test]

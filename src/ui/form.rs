@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use chrono::NaiveDate;
+use chrono::{NaiveDate, NaiveTime};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -99,6 +99,7 @@ pub struct Draft {
     pub schedule: Schedule,
     pub start: NaiveDate,
     pub ends: Option<NaiveDate>,
+    pub reminder: Option<NaiveTime>,
     pub tags: Vec<String>,
     pub note: Option<String>,
 }
@@ -111,6 +112,7 @@ pub enum Field {
     Weekly,
     Start,
     Ends,
+    Reminder,
     Tags,
     Note,
     Save,
@@ -124,7 +126,8 @@ impl Field {
             Field::Days => Field::Weekly,
             Field::Weekly => Field::Start,
             Field::Start => Field::Ends,
-            Field::Ends => Field::Tags,
+            Field::Ends => Field::Reminder,
+            Field::Reminder => Field::Tags,
             Field::Tags => Field::Note,
             Field::Note => Field::Save,
             Field::Save => Field::Name,
@@ -139,7 +142,8 @@ impl Field {
             Field::Weekly => Field::Days,
             Field::Start => Field::Weekly,
             Field::Ends => Field::Start,
-            Field::Tags => Field::Ends,
+            Field::Reminder => Field::Ends,
+            Field::Tags => Field::Reminder,
             Field::Note => Field::Tags,
             Field::Save => Field::Note,
         }
@@ -193,6 +197,7 @@ pub struct Form {
     weekly: TextInput,
     start: TextInput,
     ends: TextInput,
+    reminder: TextInput,
     tags: TextInput,
     note: TextInput,
     focus: Field,
@@ -214,6 +219,7 @@ impl Form {
             weekly,
             start,
             ends: TextInput::with_limit(10),
+            reminder: TextInput::with_limit(5),
             tags: TextInput::with_limit(80),
             note: TextInput::with_limit(160),
             focus: Field::Name,
@@ -241,6 +247,9 @@ impl Form {
         }
         if let Some(ends) = habit.ends {
             form.ends.set(&ends.to_string());
+        }
+        if let Some(reminder) = habit.reminder {
+            form.reminder.set(&reminder.format("%H:%M").to_string());
         }
         form.tags.set(&habit.tags.join(", "));
         if let Some(note) = &habit.note {
@@ -288,11 +297,17 @@ impl Form {
         }
 
         match self.focus {
-            Field::Name | Field::Start | Field::Ends | Field::Tags | Field::Note => {
+            Field::Name
+            | Field::Start
+            | Field::Ends
+            | Field::Reminder
+            | Field::Tags
+            | Field::Note => {
                 let input = match self.focus {
                     Field::Name => &mut self.name,
                     Field::Start => &mut self.start,
                     Field::Ends => &mut self.ends,
+                    Field::Reminder => &mut self.reminder,
                     Field::Tags => &mut self.tags,
                     _ => &mut self.note,
                 };
@@ -403,6 +418,20 @@ impl Form {
             }
         };
 
+        let reminder_text = self.reminder.text().trim().to_string();
+        let reminder = if reminder_text.is_empty() {
+            None
+        } else {
+            match NaiveTime::parse_from_str(&reminder_text, "%H:%M") {
+                Ok(time) => Some(time),
+                Err(_) => {
+                    self.error = Some("Remind must be a 24-hour time like 09:00, or empty.".into());
+                    self.focus = Field::Reminder;
+                    return FormAction::Continue;
+                }
+            }
+        };
+
         let mut tags: BTreeSet<String> = BTreeSet::new();
         for chunk in self.tags.text().split([',', ';']) {
             if let Some(tag) = normalize_tag(chunk) {
@@ -420,6 +449,7 @@ impl Form {
             schedule,
             start,
             ends,
+            reminder,
             tags: tags.into_iter().collect(),
             note,
         })
@@ -427,7 +457,7 @@ impl Form {
 
     pub fn draw(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
         let width = area.width.saturating_sub(4).clamp(30, 66);
-        let height = 13.min(area.height);
+        let height = 14.min(area.height);
         let popup = centered(area, width, height);
         frame.render_widget(Clear, popup);
 
@@ -437,7 +467,7 @@ impl Form {
         let inner = block.inner(popup);
         frame.render_widget(block, popup);
 
-        let rows = Layout::vertical([Constraint::Length(1); 11]).split(inner);
+        let rows = Layout::vertical([Constraint::Length(1); 12]).split(inner);
         let field_width = inner.width.saturating_sub(12) as usize;
 
         frame.render_widget(
@@ -478,6 +508,14 @@ impl Form {
         );
         frame.render_widget(
             Paragraph::new(field_row(
+                "Remind",
+                self.input_line(&self.reminder, Field::Reminder, theme, 5, "off"),
+                theme,
+            )),
+            rows[6],
+        );
+        frame.render_widget(
+            Paragraph::new(field_row(
                 "Tags",
                 self.input_line(
                     &self.tags,
@@ -488,7 +526,7 @@ impl Form {
                 ),
                 theme,
             )),
-            rows[6],
+            rows[7],
         );
         frame.render_widget(
             Paragraph::new(field_row(
@@ -496,7 +534,7 @@ impl Form {
                 self.input_line(&self.note, Field::Note, theme, field_width, "optional"),
                 theme,
             )),
-            rows[7],
+            rows[8],
         );
 
         if let Some(error) = &self.error {
@@ -505,7 +543,7 @@ impl Form {
                     truncate(error, inner.width as usize),
                     Style::default().fg(theme.missed),
                 ))),
-                rows[8],
+                rows[9],
             );
         }
 
@@ -517,7 +555,7 @@ impl Form {
         } else {
             Span::styled("  save  ", Style::default().fg(theme.dim))
         };
-        frame.render_widget(Paragraph::new(Line::from(submit)), rows[9]);
+        frame.render_widget(Paragraph::new(Line::from(submit)), rows[10]);
 
         let hint = if inner.width >= 47 {
             "tab next · arrows change · enter save · esc cancel"
@@ -529,7 +567,7 @@ impl Form {
                 hint,
                 Style::default().fg(theme.dim),
             ))),
-            rows[10],
+            rows[11],
         );
     }
 
@@ -706,6 +744,7 @@ mod tests {
         assert_eq!(draft.schedule, Schedule::Daily);
         assert_eq!(draft.start, date("2026-11-10"));
         assert_eq!(draft.ends, None);
+        assert_eq!(draft.reminder, None);
         assert!(draft.tags.is_empty());
         assert_eq!(draft.note, None);
     }
@@ -793,7 +832,7 @@ mod tests {
     fn tags_split_on_commas_and_normalise_spaces() {
         let mut form = Form::new(date("2026-11-10"));
         type_text(&mut form, "Read");
-        for _ in 0..6 {
+        for _ in 0..7 {
             form.handle_key(key(KeyCode::Tab));
         }
         type_text(&mut form, "Health & Focus, reading");
@@ -816,7 +855,8 @@ mod tests {
         type_text(&mut form, "2026-01-05");
         form.handle_key(key(KeyCode::Tab));
         type_text(&mut form, "2026-03-01");
-        form.handle_key(key(KeyCode::Tab));
+        form.handle_key(key(KeyCode::Tab)); // reminder
+        form.handle_key(key(KeyCode::Tab)); // tags
         type_text(&mut form, "#Health, reading");
         form.handle_key(key(KeyCode::Tab));
         type_text(&mut form, "20 pages a day");
