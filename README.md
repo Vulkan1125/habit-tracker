@@ -1,9 +1,10 @@
 # habit
 
-**A calm habit tracker for the terminal.** Streaks, weekly quotas, cheat days, tags, descriptions,
-dated notes, per-habit reminders, monthly HTML reports and a heatmap — plus a plain JSON file you
-can read, diff and `grep`. A small Rust core, with reminders and reports installed only when you
-want them, and no daemon, no account and no network access.
+**A feature-rich habit tracker that stays calm in the terminal.** Streaks, weekly quotas, cheat
+days, tags, descriptions, dated notes, per-habit reminders, monthly HTML reports and a heatmap —
+plus a plain JSON file you can read, diff, `grep` and script against. Simple to start and deep when
+you need it: the core is one small binary, reminders and reports are optional modules, and there is
+no daemon, no account and no network access.
 
 [![CI](https://github.com/Vulkan1125/habit-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/Vulkan1125/habit-tracker/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -18,6 +19,14 @@ want them, and no daemon, no account and no network access.
 Run `habit` and you get a full-screen TUI. Run `habit done gym` and you get a scriptable CLI. Both
 read and write the same file, so terminal widgets, cron jobs and shell aliases all see the same
 state. The TUI can now act on any past day, so backfilling no longer needs a second tool.
+
+### Simple to start, deep when you need it
+
+`habit add "Gym"` and `habit done gym` are close to the whole learning curve; the TUI opens with one
+command and needs no config file. Quotas, weekday schedules, start and end dates, cheat days, tags,
+descriptions, dated notes, reminders, reports and themes are all there when you reach for them —
+and turning one on never changes the file format or hides the basics. Reminders and reports arrive
+as modules, so a plain install stays a single small binary until you ask for more.
 
 ### Optional modules — install what you need
 
@@ -252,6 +261,22 @@ Gym · 4×/week · since 2026-09-14
   check-ins    28
   cheat days   1 this month (limit 1)
 ```
+
+### Scriptable from any language
+
+Every action is a subcommand with a real exit code, so anything that can run a process can drive
+`habit`: shell scripts, cron, launchd/systemd jobs, git hooks, CI, an editor plugin, or a
+Python/Node/Ruby program. A full integration is often one line:
+
+```python
+import subprocess
+subprocess.run(["habit", "done", "gym"], check=True)
+```
+
+The state is one pretty-printed JSON file, so a program can also read it directly with
+`habit path` instead of shelling out; `habit export` writes CSV for spreadsheets and `habit import`
+merges it back. There is deliberately no daemon, socket or plugin API: the binary and the file are
+the interface.
 
 ### Data safety
 
