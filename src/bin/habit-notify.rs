@@ -96,7 +96,7 @@ fn remind(
     always: bool,
 ) -> Result<()> {
     if !data.habits.iter().any(|habit| habit.reminder.is_some()) {
-        println!("no reminders set — give a habit one with `habit remind-time <habit> 09:00`");
+        println!("no reminders set; give a habit one with `habit remind-time <habit> 09:00`");
         return Ok(());
     }
 

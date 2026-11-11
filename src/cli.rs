@@ -700,7 +700,7 @@ pub fn uninstall(store: &Store, force: bool, dry_run: bool) -> Result<()> {
     let plan = uninstall::plan(store.path(), config_path.as_deref(), &current, jobs);
 
     if plan.is_empty() {
-        println!("nothing to remove — habit is already gone");
+        println!("nothing to remove; habit is already gone");
         return Ok(());
     }
 
@@ -716,7 +716,7 @@ pub fn uninstall(store: &Store, force: bool, dry_run: bool) -> Result<()> {
         return Ok(());
     }
     if !force && !confirm_uninstall()? {
-        println!("cancelled — nothing was removed");
+        println!("cancelled; nothing was removed");
         return Ok(());
     }
 
@@ -730,7 +730,7 @@ pub fn uninstall(store: &Store, force: bool, dry_run: bool) -> Result<()> {
             outcome.removed
         );
     }
-    println!("removed {} item(s) — habit is uninstalled", outcome.removed);
+    println!("removed {} item(s); habit is uninstalled", outcome.removed);
     Ok(())
 }
 
@@ -926,7 +926,7 @@ fn schedule(store: &Store, data: &Data, today: NaiveDate, action: ScheduleAction
             let units = reminders::reminder_units(platform, &program, &data_path, &times)?;
             if dry_run {
                 if times.is_empty() {
-                    println!("no reminder times set — give a habit one with `habit remind-time`");
+                    println!("no reminder times set; give a habit one with `habit remind-time`");
                 } else {
                     print_units(&units);
                 }
@@ -938,7 +938,7 @@ fn schedule(store: &Store, data: &Data, today: NaiveDate, action: ScheduleAction
             }
             if times.is_empty() {
                 println!(
-                    "no reminders set — give a habit one with `habit remind-time <habit> 09:00`"
+                    "no reminders set; give a habit one with `habit remind-time <habit> 09:00`"
                 );
             } else {
                 let labels = times
@@ -1261,7 +1261,7 @@ fn print_list(data: &Data, today: NaiveDate, config: &Config, tags: &[String]) -
         };
         let streak = stats::current_streak(habit, &data.history(), today, config.week_start);
         let streak_label = if streak.length == 0 {
-            "—".to_string()
+            "-".to_string()
         } else {
             streak.label()
         };
@@ -1413,7 +1413,7 @@ fn print_log(data: &Data, today: NaiveDate, count: u32, all: bool) {
         let mut parts = names;
         parts.extend(excused);
         let summary = if parts.is_empty() {
-            "—".to_string()
+            "-".to_string()
         } else {
             truncate(&parts.join(", "), 80)
         };

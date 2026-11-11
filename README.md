@@ -1,7 +1,7 @@
 # habit
 
 **A feature-rich habit tracker that stays calm in the terminal.** Streaks, weekly quotas, cheat
-days, tags, descriptions, dated notes, per-habit reminders, monthly HTML reports and a heatmap —
+days, tags, descriptions, dated notes, per-habit reminders, monthly HTML reports and a heatmap,
 plus a plain JSON file you can read, diff, `grep` and script against. **Minimal to begin. Depth on
 demand.** The core is one small binary, reminders and reports are optional modules, and there is no
 daemon, no account and no network access.
@@ -24,11 +24,11 @@ state. The TUI can now act on any past day, so backfilling no longer needs a sec
 
 `habit add "Gym"` and `habit done gym` are close to the whole learning curve; the TUI opens with one
 command and needs no config file. Quotas, weekday schedules, start and end dates, cheat days, tags,
-descriptions, dated notes, reminders, reports and themes are all there when you reach for them —
+descriptions, dated notes, reminders, reports and themes are all there when you reach for them,
 and turning one on never changes the file format or hides the basics. Reminders and reports arrive
 as modules, so a plain install stays a single small binary until you ask for more.
 
-### Optional modules — install what you need
+### Optional modules: install what you need
 
 The core app tracks habits. Two larger features ship as companion binaries and are installed only
 when you ask for them:
@@ -43,7 +43,7 @@ habit modules remove report     # uninstall it and stop its scheduled job
 `habit modules` on its own is the same as `list`. In the TUI, `M` opens the modules screen; `enter`
 or `space` installs or removes the highlighted module. Modules live in `<data dir>/modules`, beside
 the data file, so each data file carries its own feature set. Installing copies the binary that
-shipped with `habit` — a release archive, Homebrew cellar or `cargo install` — and never uses the
+shipped with `habit` (a release archive, Homebrew cellar or `cargo install`) and never uses the
 network.
 
 Without the notifications module there is no **Remind** field, no reminder line in the detail pane
@@ -58,7 +58,7 @@ when a module is removed, so reinstalling it brings the feature back.
 | Schedule | Use it for | Streak counts |
 | --- | --- | --- |
 | `daily` | meditation, flossing | consecutive days |
-| `mon,wed,fri` | gym, language class | consecutive *due* days — off days never break it |
+| `mon,wed,fri` | gym, language class | consecutive *due* days; off days never break it |
 | `4×/week` | “move four times a week” | consecutive *complete weeks* |
 
 A quota habit is never “missed” on a Tuesday just because you went on Monday: only the weekly
@@ -82,7 +82,7 @@ date passes the row reads `ended`, the detail pane calls it `finished`, it sorts
 habits, and its streak freezes on its final day instead of decaying forever. Both dates are
 editable in the TUI's add/edit dialog.
 
-### Cheat days — one per calendar month
+### Cheat days: one per calendar month
 
 Life happens. Mark a day as a cheat day and the streak skips it exactly like a non-due day. Each
 habit gets **one excused day per calendar month**; the second one in the same month is an ordinary
@@ -95,7 +95,7 @@ habit cheat gym --off           # remove it again
 ```
 
 - Cheat days never count as completions and are excluded from the completion-rate denominator.
-- They do not fill a weekly quota — otherwise `4×/week` would become “cheat four times a week”.
+- They do not fill a weekly quota; otherwise `4×/week` would become “cheat four times a week”.
 - The first cheat in a month is `◆` in its own colour; later ones render as missed days, so the
   difference is always visible.
 - Archive and delete carry cheat days along with check-ins.
@@ -150,7 +150,7 @@ whether to merge the two, so a typo cannot silently create a near-duplicate tag.
 
 ![The Tags tab: each tag with its active-habit count, ready to open or rename](docs/screenshots/tags.png)
 
-Press `n` to write or edit a note — right after checking a habit off is the natural moment. The
+Press `n` to write or edit a note; right after checking a habit off is the natural moment. The
 dialog opens on the day you are looking at (today unless you moved with `[` / `]`), and `tab` moves
 into its date field if you want another day: `↑` / `↓` step one day and typing takes any
 `YYYY-MM-DD`. A date in the future or before the habit started is refused with an inline message
@@ -182,11 +182,11 @@ single token can offer alternatives: `#health|#fitness` matches habits with eith
   start); empty input removes the note and edits are covered by undo.
 - **Hideable bottom bar**: `b` reclaims the hint line and gives the panes one more row.
 - **Add/edit dialog** with schedule picker, weekday toggles, start/end dates, a reminder time, tags
-  and description — all validated inline. A time in **Remind** is what opts a habit into
+  and description, all validated inline. A time in **Remind** is what opts a habit into
   notifications; leaving it empty keeps it silent.
 - **Instant feedback** in the status line, including streak effects and a warning when a second
   cheat in a month will break the run.
-- **One-step undo** for every mutation — check-off, cheat, add, edit, rename/merge a tag, archive
+- **One-step undo** for every mutation: check-off, cheat, add, edit, rename/merge a tag, archive
   and delete.
 - **Archive instead of delete**: history is kept, the habit leaves the Habits tab and `d` moves it
   between the Archive tab's **Archived** and **Ended** groups.
@@ -302,8 +302,8 @@ habit remind-time gym           # print the current time
 habit remind-time gym --clear   # turn it off
 ```
 
-`habit remind` is a single process: it reads the file, works out what is still open — quota habits
-only nudge while their week is short, and done, excused and finished days are skipped — then asks
+`habit remind` is a single process: it reads the file, works out what is still open (quota habits
+only nudge while their week is short, and done, excused and finished days are skipped), then asks
 the desktop for a notification. On macOS that is `osascript`, on Linux `notify-send`; elsewhere it
 prints the text. Nothing stays running, and no network is involved. `--at HH:MM` limits a run to
 the habits with that time, which is how one OS job per time shares the command.
@@ -334,13 +334,13 @@ macOS gets one launchd agent per distinct reminder time; Linux gets a
 absolute binary and data path, so a minimal scheduler `PATH` does not matter. Re-running `install`
 syncs: it writes a unit for each time in use and removes units for times no habit uses any more,
 including the single-unit names from 0.6.0. `--dry-run` prints the files without touching the
-system. macOS may ask for notification permission the first time a notification is posted — allow
+system. macOS may ask for notification permission the first time a notification is posted; allow
 it once, and the rest arrive quietly.
 
 ### Monthly HTML reports
 
-The reports module (`habit modules install report`) writes one self-contained page per month —
-inline CSS, no scripts, no fonts to download and no network — to
+The reports module (`habit modules install report`) writes one self-contained page per month (
+inline CSS, no scripts, no fonts to download and no network) to
 `<data dir>/reports/habit-YYYY-MM.html`:
 
 ```sh
@@ -359,7 +359,7 @@ a mail or turned into a PDF.
 
 The page inherits the palette you use in the app: `theme` in `config.toml` decides its colours, in
 the same light and dark variants as the terminal. Every palette is carried inside the file, so a
-finished report can be repainted without running anything — change `data-palette` on the `<html>`
+finished report can be repainted without running anything: change `data-palette` on the `<html>`
 element, for example `<html lang="en" data-palette="gruvbox">`, or edit the hex values in the
 `:root` block at the top of the stylesheet.
 
@@ -398,7 +398,7 @@ curl -fsSL https://github.com/Vulkan1125/habit-tracker/releases/latest/download/
 ```
 
 The installer checks the download against the release's `SHA256SUMS` and installs all three
-binaries — `habit`, `habit-notify` and `habit-report` — so `habit modules install …` works offline.
+binaries (`habit`, `habit-notify` and `habit-report`), so `habit modules install …` works offline.
 On Debian/Ubuntu (`apt-get`), Fedora/RHEL (`dnf`/`yum`) and Arch (`pacman`) it uses the native
 package; everywhere else, including macOS, it unpacks the prebuilt binaries into `~/.local/bin`
 without needing root. Its own output stays short: rustup, Cargo and the package managers run
@@ -481,7 +481,7 @@ report jobs, and the `habit`, `habit-notify` and `habit-report` binaries. It pri
 and asks you to type `yes`; `--force` skips the question and `--dry-run` only prints the list.
 
 When this copy came from Homebrew or is a Cargo build directory, the binaries are left to the tool
-that owns them — the command prints the right one. Package-managed installs are removed with
+that owns them; the command prints the right one. Package-managed installs are removed with
 `brew uninstall habit`, `cargo uninstall habit` or the distribution's package manager. There is no
 undo, so it asks first; it does not edit your shell's rc file, so remove by hand any `PATH` line
 that `install.sh` added.
@@ -508,7 +508,7 @@ Nothing else to configure. The data file is created on the first change.
 | Glyph | Meaning |
 | --- | --- |
 | `●` | done on the selected day (list, dot strip, heatmap) |
-| `○` | due but open in the row marker; a missed day in the dot strip — the colour tells them apart |
+| `○` | due but open in the row marker; a missed day in the dot strip; the colour tells them apart |
 | `◆` | cheat day (the excused first one in the month) |
 | `░` | a missed day in the heatmap |
 | `◌` | today, still open |
@@ -535,13 +535,13 @@ Nothing else to configure. The data file is created on the first change.
 | `d` | archive or restore (history kept) |
 | `x` | delete the habit and its history (asks first) |
 | `u` | undo the last change |
-| `/` | filter — plain text matches name/id/tags/description, `#tag` matches tags, `#a\|#b` matches either, `enter` keeps, `esc` clears |
+| `/` | filter: plain text matches name/id/tags/description, `#tag` matches tags, `#a\|#b` matches either, `enter` keeps, `esc` clears |
 | `r` | reload the data file from disk |
 | `T` | next colour theme (saved to config) |
 | `m` | switch dark / light mode (saved) |
 | `M` | install or remove optional modules |
 | `?` | help overlay |
-| `q`, `esc` | quit — `esc` first clears a filter, then backs out of a tag view or another tab |
+| `q`, `esc` | quit: `esc` first clears a filter, then backs out of a tag view or another tab |
 | `y` / `n` | in the notification setup prompt: install the schedule now / keep it silent for now |
 
 In the add/edit dialog: `tab` / `shift-tab` moves between fields, `←→` changes the schedule kind,
@@ -603,7 +603,7 @@ Global flags, usable before or after the subcommand:
 | `habit config` | | print effective config, data path, theme and mode |
 | `habit themes` | | list the palettes |
 
-Habits can be referenced by **id, exact name (case-insensitive), or a unique id prefix** — so
+Habits can be referenced by **id, exact name (case-insensitive), or a unique id prefix**, so
 `habit done gym`, `habit done Gym` and `habit done g` all work. Ambiguous prefixes list the
 candidates instead of guessing.
 
@@ -635,7 +635,7 @@ If Monday and Wednesday are done, the streak is 2 and today's marker is `·` (no
 and `space` on Friday is still allowed as extra credit.
 
 **4×/week habit with three sessions so far this week.** The week is not counted in the streak yet,
-but it does not break it either — the list shows `3/4 wk` and the streak stays at its previous
+but it does not break it either, the list shows `3/4 wk` and the streak stays at its previous
 value until the week closes.
 
 **A habit created today.** The heatmap and dot strip show the previous days as not due (`·`), not
@@ -654,7 +654,7 @@ Resolution order for the data file:
 3. `$XDG_DATA_HOME/habit/data.json` (only if absolute)
 4. `$HOME/.local/share/habit/data.json`
 
-Format (version 4) — habits carry their window, reminder and metadata; `log` and `cheats` are
+Format (version 4): habits carry their window, reminder and metadata; `log` and `cheats` are
 parallel maps from date to habit ids, and `notes` maps a date to that habit's journal entry:
 
 ```json
@@ -778,7 +778,7 @@ a `starship` prompt can all trigger or read it.
 src/
   model.rs    habits, schedules, log, cheats, JSON shape, tags, id slugs
   store.rs    path resolution, atomic load/save, format version and upgrade
-  stats.rs    streaks, completion, heatmap — pure functions
+  stats.rs    streaks, completion, heatmap (pure functions)
   reminders.rs  what is due, notification text, launchd/systemd unit files
   report.rs   monthly stats and the self-contained HTML page
   app.rs      TUI state, date navigation, key handling, persist-on-change, undo
@@ -797,7 +797,7 @@ A few decisions worth knowing:
   confused, and the monthly allowance is derived at query time, so reordering or removing a cheat
   immediately recomputes the streak.
 - **Undo is snapshot-based.** A whole `Data` snapshot is tiny at personal scale, so every mutation
-  gets undo for free — including delete — instead of a bespoke inverse per action.
+  gets undo for free (including delete) instead of a bespoke inverse per action.
 - **Persistence happens on every change**, not on quit, and a failed save rolls the in-memory state
   back. Killing the terminal never loses a check-off.
 - **The UI is tested without a TTY** using ratatui's `TestBackend`: the tests render frames and
@@ -827,7 +827,7 @@ several widths and in the overlays.
 
 ## Roadmap
 
-`0.2.0` shipped the six features planned for it — start/end dates, monthly cheat days, notes, tags
+`0.2.0` shipped the six features planned for it: start/end dates, monthly cheat days, notes, tags
 and filtering, a detail-pane trend graph and the visual/theming pass. Later releases added dated
 notes, the Tags tab, tag rename/merge, the Archive tab and opt-in native reminders; `0.7.0` added
 per-habit reminder times with a first-run setup prompt and monthly HTML reports; `0.8.0` moved

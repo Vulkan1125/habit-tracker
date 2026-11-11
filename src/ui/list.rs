@@ -143,11 +143,11 @@ fn habit_list(frame: &mut Frame, area: Rect, app: &mut App) {
 
     if rows.is_empty() {
         let message = if app.data.habits.is_empty() {
-            "No habits yet — press a to add the first one"
+            "No habits yet: press a to add the first one"
         } else if app.tab == Tab::Archive {
-            "Nothing archived yet — press d on a habit"
+            "Nothing archived yet: press d on a habit"
         } else if app.tab == Tab::Habits {
-            "Nothing running — see the Archive tab"
+            "Nothing running: see the Archive tab"
         } else if app.tag_focus.is_some() {
             "Nothing in this tag matches the filter"
         } else if app.filter.is_empty() {
@@ -246,7 +246,7 @@ fn tag_list(frame: &mut Frame, area: Rect, app: &mut App) {
 
     if tags.is_empty() {
         items.push(ListItem::new(Line::from(Span::styled(
-            " No tags yet — add them in the add/edit dialog",
+            " No tags yet: add them in the add/edit dialog",
             Style::default().fg(theme.dim),
         ))));
     } else {

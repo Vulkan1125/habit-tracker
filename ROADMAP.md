@@ -69,7 +69,7 @@ Today a habit starts on `created` and never ends; you archive it as a manual, re
 
 ---
 
-## 2. Cheat days — one per month
+## 2. Cheat days: one per month
 
 **Shipped in 0.2.0.** The streak engine takes `History { log, cheats }`; `Cheats::is_excused`
 derives the monthly allowance at query time, so backfilling or removing an earlier cheat immediately
@@ -96,7 +96,7 @@ Keyed by date and habit id, matching `log`'s shape, sorted, hand-editable.
 - Monthly allowance is per habit and per calendar month. The first cheat in a month is free; from
   the second onward the day counts as a normal miss.
 - The allowance is checked when the streak is computed, not when the day is marked. Marking a
-  second cheat is allowed — the UI flags it (`2nd cheat in November · breaks streak`) so the
+  second cheat is allowed; the UI flags it (`2nd cheat in November · breaks streak`) so the
   consequence is visible before it happens.
 - Archive/delete must carry cheat days along with log entries.
 
@@ -128,13 +128,13 @@ additive.
 The `note` field and its rendering already existed in 0.1.0; there was no way to write one from
 the app.
 
-**Phase 1 — per-habit note (small)**
+**Phase 1: per-habit note (small)**
 
 - Editable in the add/edit dialog, multi-line, wrapped in the detail pane.
 - CLI: `habit note <habit> "text"`, `habit note <habit> --clear`, and `habit note <habit>` to print.
 - Included in search matching.
 
-**Phase 2 — per-day note**
+**Phase 2: per-day note**
 
 Shipped as a `"notes": { "2026-11-10": "bad sleep, still showed up" }` map, shown in the detail
 pane with the date on the left. The cursor day picks the note, so it doubles as a lightweight
@@ -144,7 +144,7 @@ journal without turning the app into a journal app.
 
 - Length limit? Prefer no hard limit, but wrap at the pane width and cap the pane height with a
   scroll indicator.
-- Do notes belong in the JSON file or a sidecar? Same file — one file is the selling point.
+- Do notes belong in the JSON file or a sidecar? Same file; one file is the selling point.
 
 ---
 
@@ -173,7 +173,7 @@ from JSON when empty, like `note` and `archived`.
 - ~~OR filtering (`#a|#b`) if the parser can stay simple.~~ **Shipped in 0.9.0:** a `|` inside one
   token offers alternatives, while separate tokens and separate `--tag` arguments stay ANDed.
 
-**Shipped in 0.5.0 — rename and merge**
+**Shipped in 0.5.0: rename and merge**
 
 `e` on the Tags list opens a prompt for the tag under the cursor; `habit rename-tag old new` does
 the same from the shell. Renaming onto a name that already exists merges the two, asking first in
@@ -222,20 +222,20 @@ The heatmap answers "which days did I do it". It does not answer "am I trending 
 
 ## Carried over from 0.1.x
 
-- A quota bar chart and richer multi-tag views — **shipped in 0.9.0** as the weekly quota chart in
+- A quota bar chart and richer multi-tag views, **shipped in 0.9.0** as the weekly quota chart in
   the detail pane and `#a|#b` / `--tag a|b` either-or filtering.
-- Optional reminders/notifications — **shipped in 0.6.0** as `habit remind` plus `habit schedule
+- Optional reminders/notifications, **shipped in 0.6.0** as `habit remind` plus `habit schedule
   install`, which writes a launchd agent or systemd user timer. 0.7.0 added per-habit reminder
   times, one job per distinct time, and a first-run setup prompt. 0.8.0 made the whole feature an
   installable module (`habit modules install notify`). Still no daemon and still opt-in, exactly
   as sketched here.
-- A monthly HTML report — **shipped in 0.7.0** as `habit report` plus `habit schedule reports
+- A monthly HTML report, **shipped in 0.7.0** as `habit report` plus `habit schedule reports
   install`; 0.8.0 moved it into the installable reports module. One self-contained page per month,
   on demand or on a chosen day. **0.10.0** added the month-wide completion chart with its seven-day
   average, per-habit scores, descriptions, and notes that are both listed and revealed on hover.
   Reports now open in the app's palette, with every palette carried inside the page so it can be
   repainted by changing one attribute.
-- Import/export helpers — **shipped in 0.9.0** as `habit export` and `habit import`, covering habits,
+- Import/export helpers, **shipped in 0.9.0** as `habit export` and `habit import`, covering habits,
   metadata and their complete history. Reading an older `data.json` was already handled by the
   store's version upgrade path.
 - Windows CI.
@@ -251,7 +251,7 @@ The heatmap answers "which days did I do it". It does not answer "am I trending 
 ## Compatibility policy
 
 The version guard exists so an older binary can never silently mangle a newer file. Any change to
-the on-disk shape — including "additive" fields like `ends`, `tags`, `cheats` and `notes` — bumps
+the on-disk shape (including "additive" fields like `ends`, `tags`, `cheats` and `notes`) bumps
 `DATA_VERSION` and ships a migration in `store.rs`, because an old build would otherwise read a v1
 file, drop the fields it does not know about on the next save, and lose data quietly. With the bump,
 that old build refuses the file with a clear error instead, and the original is still on disk as

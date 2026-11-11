@@ -225,7 +225,7 @@ fn reminder_setup_overlay(frame: &mut Frame, area: Rect, theme: &Theme) {
         Line::raw(""),
         Line::from(Span::styled(
             truncate(
-                "macOS may ask for notification permission the first time — allow it.",
+                "macOS may ask for notification permission the first time; allow it.",
                 room,
             ),
             Style::default().fg(theme.warn),

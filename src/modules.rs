@@ -1,9 +1,9 @@
 //! Optional features, installed on demand.
 //!
 //! The core app is deliberately small: check-ins, streaks, tags and the TUI.
-//! Everything that is not needed to track a habit is a companion binary —
+//! Everything that is not needed to track a habit is a companion binary:
 //! `habit-notify` for reminder times and desktop notifications, `habit-report`
-//! for the monthly HTML pages — and stays dormant until the user installs it
+//! for the monthly HTML pages. It stays dormant until the user installs it
 //! with `habit modules install <name>`.
 //!
 //! A module is *installed* when its binary is copied into `<data dir>/modules`.

@@ -2,7 +2,7 @@
 //!
 //! Uninstalling is the one destructive command in the program, so the paths are
 //! collected into a [`Plan`] first: the CLI can print it, ask once, and only
-//! then delete. Everything here is local — data, backups, optional modules,
+//! then delete. Everything here is local: data, backups, optional modules,
 //! generated reports, config, scheduled jobs and the binaries themselves.
 //!
 //! The binaries are left alone when this copy belongs to Cargo's build

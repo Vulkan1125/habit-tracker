@@ -45,7 +45,7 @@ impl Streak {
 
 /// Whether `date` counts as done, missed, excused, or not expected.
 ///
-/// For `TimesPerWeek` habits an un-logged day is *not* a miss — only the weekly
+/// For `TimesPerWeek` habits an un-logged day is *not* a miss; only the weekly
 /// quota matters, so those days render as "not due" and the quota is shown
 /// separately. The same is true outside the habit's start/end window.
 pub fn status_on(habit: &Habit, history: &History, date: NaiveDate, today: NaiveDate) -> Status {

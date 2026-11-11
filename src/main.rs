@@ -1,4 +1,4 @@
-//! `habit` — a terminal habit tracker.
+//! `habit`, a terminal habit tracker.
 //!
 //! No arguments opens the TUI; with a subcommand it behaves like a normal CLI.
 

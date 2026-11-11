@@ -1,5 +1,5 @@
 #!/bin/sh
-# habit installer — Linux and macOS
+# habit installer: Linux and macOS
 #
 #   curl -fsSL https://github.com/Vulkan1125/habit-tracker/releases/latest/download/install.sh | sh
 #
@@ -247,7 +247,7 @@ if [ "$kind" = "source" ]; then
             say "dry run: would install Rust with rustup, then build habit $version"
             exit 0
         fi
-        say "installing Rust with rustup — this can take a minute"
+        say "installing Rust with rustup, this can take a minute"
         sh "$tmp/rustup.sh" -y --profile minimal --quiet
         if [ -f "$HOME/.cargo/env" ]; then
             # shellcheck disable=SC1091
@@ -263,7 +263,7 @@ if [ "$kind" = "source" ]; then
         exit 0
     fi
     confirm "Build habit $version from source into $install_dir?" || exit 1
-    say "compiling — this can take a few minutes"
+    say "compiling, this can take a few minutes"
     cargo install --quiet --git "https://github.com/$REPO" --tag "$tag" --locked \
         --root "$PREFIX" --force ||
         die "the build failed"

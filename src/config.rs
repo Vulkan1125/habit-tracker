@@ -111,7 +111,7 @@ impl Config {
 
     pub fn to_toml(&self) -> String {
         format!(
-            "# habit configuration — `T` and `m` in the TUI update these values.\ntheme = \"{}\"\nmode = \"{}\"\nweek_start = \"{}\"\n",
+            "# habit configuration; `T` and `m` in the TUI update these values.\ntheme = \"{}\"\nmode = \"{}\"\nweek_start = \"{}\"\n",
             self.theme.label(),
             self.mode.label(),
             self.week_start.short()
