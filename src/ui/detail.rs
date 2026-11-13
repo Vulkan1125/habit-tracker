@@ -65,6 +65,12 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         Span::raw("    "),
         Span::styled(habit.schedule.describe(), Style::default().fg(theme.dim)),
     ];
+    if habit.per_day() > 1 {
+        subtitle.push(Span::styled(
+            format!(" · {}/day", habit.per_day()),
+            Style::default().fg(theme.warn),
+        ));
+    }
     subtitle.push(Span::styled(
         format!(" · {}", habit.window_label()),
         Style::default().fg(theme.dim),
@@ -128,6 +134,24 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(theme.dim),
         ),
     ]));
+
+    if habit.per_day() > 1 {
+        let target = habit.per_day();
+        let count = app.data.log.count_on(app.today, &habit.id);
+        lines.push(Line::from(vec![
+            Span::styled(pad_right("today", 11), Style::default().fg(theme.dim)),
+            Span::styled(
+                format!("{count}/{target}"),
+                Style::default().fg(if count >= target {
+                    theme.done
+                } else if count > 0 {
+                    theme.warn
+                } else {
+                    theme.dim
+                }),
+            ),
+        ]));
+    }
 
     let completion = stats::completion(habit, &app.data.history(), app.today, app.week_start, 30);
     let (filled, empty) = theme.bar(f64::from(completion.percent()) / 100.0, 10);
@@ -315,6 +339,7 @@ fn heatmap_lines(
         for (_, status) in cells {
             let (glyph, style) = match status {
                 Status::Done => ("█", Style::default().fg(theme.done)),
+                Status::Partial => ("▒", Style::default().fg(theme.warn)),
                 Status::Cheat => ("◆", Style::default().fg(theme.cheat)),
                 Status::Missed => ("░", Style::default().fg(theme.missed)),
                 Status::Pending => ("◌", Style::default().fg(theme.warn)),

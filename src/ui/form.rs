@@ -12,7 +12,7 @@ use ratatui::widgets::{Block, Clear, Paragraph};
 
 use crate::app::parse_date;
 use habit::format::{pad_right, truncate};
-use habit::model::{ALL_DAYS, Day, Habit, Schedule, normalize_tag};
+use habit::model::{ALL_DAYS, Day, Habit, MAX_TARGET, Schedule, normalize_tag};
 use habit::theme::Theme;
 
 #[derive(Debug, Clone)]
@@ -102,6 +102,7 @@ pub struct Draft {
     pub reminder: Option<NaiveTime>,
     pub tags: Vec<String>,
     pub note: Option<String>,
+    pub target: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,6 +111,7 @@ pub enum Field {
     Kind,
     Days,
     Weekly,
+    Target,
     Start,
     Ends,
     Reminder,
@@ -126,7 +128,8 @@ impl Field {
             Field::Name => Field::Kind,
             Field::Kind => Field::Days,
             Field::Days => Field::Weekly,
-            Field::Weekly => Field::Start,
+            Field::Weekly => Field::Target,
+            Field::Target => Field::Start,
             Field::Start => Field::Ends,
             Field::Ends if reminders => Field::Reminder,
             Field::Ends => Field::Tags,
@@ -143,7 +146,8 @@ impl Field {
             Field::Kind => Field::Name,
             Field::Days => Field::Kind,
             Field::Weekly => Field::Days,
-            Field::Start => Field::Weekly,
+            Field::Target => Field::Weekly,
+            Field::Start => Field::Target,
             Field::Ends => Field::Start,
             Field::Reminder => Field::Ends,
             Field::Tags if reminders => Field::Reminder,
@@ -199,6 +203,7 @@ pub struct Form {
     kind: Kind,
     days: [bool; 7],
     weekly: TextInput,
+    target: TextInput,
     start: TextInput,
     ends: TextInput,
     reminder: TextInput,
@@ -228,6 +233,7 @@ impl Form {
             kind: Kind::Daily,
             days: [false; 7],
             weekly,
+            target: TextInput::with_limit(2),
             start,
             ends: TextInput::with_limit(10),
             reminder: TextInput::with_limit(5),
@@ -264,6 +270,9 @@ impl Form {
         }
         if let Some(ends) = habit.ends {
             form.ends.set(&ends.to_string());
+        }
+        if habit.per_day() > 1 {
+            form.target.set(&habit.per_day().to_string());
         }
         if let Some(reminder) = habit.reminder {
             form.reminder.set(&reminder.format("%H:%M").to_string());
@@ -369,6 +378,15 @@ impl Form {
                 KeyCode::Backspace => self.weekly.backspace(),
                 _ => {}
             },
+            Field::Target => match key.code {
+                KeyCode::Char(character) if character.is_ascii_digit() => {
+                    if self.target.text().chars().count() < 2 {
+                        self.target.insert(character);
+                    }
+                }
+                KeyCode::Backspace => self.target.backspace(),
+                _ => {}
+            },
             Field::Save => {}
         }
 
@@ -407,6 +425,20 @@ impl Form {
                     return FormAction::Continue;
                 }
                 Schedule::TimesPerWeek { n }
+            }
+        };
+
+        let target_text = self.target.text().trim().to_string();
+        let target: u32 = if target_text.is_empty() {
+            1
+        } else {
+            match target_text.parse() {
+                Ok(value) if (1..=MAX_TARGET).contains(&value) => value,
+                _ => {
+                    self.error = Some(format!("Per day must be between 1 and {MAX_TARGET}."));
+                    self.focus = Field::Target;
+                    return FormAction::Continue;
+                }
             }
         };
 
@@ -473,12 +505,13 @@ impl Form {
             reminder,
             tags: tags.into_iter().collect(),
             note,
+            target,
         })
     }
 
     pub fn draw(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
         let width = area.width.saturating_sub(4).clamp(30, 66);
-        let rows_count = if self.reminders { 12 } else { 11 };
+        let rows_count = if self.reminders { 13 } else { 12 };
         let height = (rows_count + 2).min(area.height);
         let popup = centered(area, width, height);
         frame.render_widget(Clear, popup);
@@ -489,7 +522,7 @@ impl Form {
         let inner = block.inner(popup);
         frame.render_widget(block, popup);
 
-        let rows = Layout::vertical([Constraint::Length(1); 12]).split(inner);
+        let rows = Layout::vertical(vec![Constraint::Length(1); rows_count as usize]).split(inner);
         let field_width = inner.width.saturating_sub(12) as usize;
         let mut row = 0;
 
@@ -514,6 +547,15 @@ impl Form {
         row += 1;
         frame.render_widget(
             Paragraph::new(field_row("Per week", self.weekly_line(theme), theme)),
+            rows[row],
+        );
+        row += 1;
+        frame.render_widget(
+            Paragraph::new(field_row(
+                "Per day",
+                self.input_line(&self.target, Field::Target, theme, 4, "1"),
+                theme,
+            )),
             rows[row],
         );
         row += 1;
@@ -865,6 +907,31 @@ mod tests {
     }
 
     #[test]
+    fn per_day_is_prefilled_and_saved() {
+        let mut habit = Habit::new(
+            "water".into(),
+            "Water".into(),
+            Schedule::Daily,
+            date("2026-11-01"),
+        );
+        habit.target = 3;
+        let mut form = Form::from_habit(&habit);
+        assert_eq!(form.target.text(), "3");
+        form.focus = Field::Target;
+        form.handle_key(key(KeyCode::Backspace));
+        type_text(&mut form, "0");
+        assert!(matches!(
+            form.handle_key(key(KeyCode::Enter)),
+            FormAction::Continue
+        ));
+        assert!(form.error.as_deref().unwrap().contains("Per day"));
+        form.handle_key(key(KeyCode::Backspace));
+        type_text(&mut form, "2");
+        let draft = submitted(form.handle_key(key(KeyCode::Enter)));
+        assert_eq!(draft.target, 2);
+    }
+
+    #[test]
     fn without_the_notifications_module_the_remind_row_is_skipped() {
         let mut form = Form::new_with(date("2026-11-10"), false);
         form.focus = Field::Ends;
@@ -890,7 +957,7 @@ mod tests {
     fn tags_split_on_commas_and_normalise_spaces() {
         let mut form = Form::new(date("2026-11-10"));
         type_text(&mut form, "Read");
-        for _ in 0..7 {
+        for _ in 0..8 {
             form.handle_key(key(KeyCode::Tab));
         }
         type_text(&mut form, "Health & Focus, reading");
@@ -902,8 +969,8 @@ mod tests {
     fn dates_tags_and_notes_are_parsed_on_save() {
         let mut form = Form::new(date("2026-11-10"));
         type_text(&mut form, "Read");
-        // name -> kind -> days -> weekly -> start -> ends -> tags -> note
-        for _ in 0..4 {
+        // name -> kind -> days -> weekly -> per day -> start
+        for _ in 0..5 {
             form.handle_key(key(KeyCode::Tab));
         }
         // Replace the prefilled start date.
@@ -932,6 +999,7 @@ mod tests {
         form.handle_key(key(KeyCode::Tab));
         form.handle_key(key(KeyCode::Tab));
         form.handle_key(key(KeyCode::Tab));
+        form.handle_key(key(KeyCode::Tab));
         form.handle_key(key(KeyCode::Tab)); // start
         form.handle_key(key(KeyCode::Tab)); // ends
         type_text(&mut form, "2026-01-01");
@@ -946,6 +1014,7 @@ mod tests {
     fn a_malformed_start_date_is_rejected() {
         let mut form = Form::new(date("2026-11-10"));
         type_text(&mut form, "Read");
+        form.handle_key(key(KeyCode::Tab));
         form.handle_key(key(KeyCode::Tab));
         form.handle_key(key(KeyCode::Tab));
         form.handle_key(key(KeyCode::Tab));

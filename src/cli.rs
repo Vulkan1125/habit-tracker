@@ -66,20 +66,29 @@ pub enum Command {
         /// Daily reminder time, 24-hour HH:MM (opt-in)
         #[arg(long, value_name = "HH:MM")]
         remind: Option<String>,
+        /// Entries needed on each due day (default 1)
+        #[arg(long, default_value_t = 1, value_name = "N")]
+        per_day: u32,
     },
-    /// Check a habit off
+    /// Check a habit off (adds one entry)
     Done {
         /// Habit id or name (a unique prefix works)
         habit: String,
         /// Backfill another day (YYYY-MM-DD)
         #[arg(long, value_name = "DATE")]
         date: Option<NaiveDate>,
+        /// Set the day's total instead of adding one
+        #[arg(long, value_name = "N")]
+        count: Option<u32>,
     },
-    /// Un-check a habit
+    /// Un-check a habit (takes one entry back)
     Undo {
         habit: String,
         #[arg(long, value_name = "DATE")]
         date: Option<NaiveDate>,
+        /// Clear the whole day instead of taking one entry back
+        #[arg(long)]
+        all: bool,
     },
     /// Excuse a day: one per calendar month, does not break the streak
     Cheat {
@@ -186,6 +195,13 @@ pub enum Command {
     },
     /// Archive or restore a habit (history is kept)
     Archive { habit: String },
+    /// Show or change how many entries a habit needs per due day
+    PerDay {
+        habit: String,
+        /// New count per day (1-99); omit to print the current value
+        #[arg(value_name = "N")]
+        value: Option<u32>,
+    },
     /// Delete a habit and its history
     Remove {
         habit: String,
@@ -343,9 +359,16 @@ pub fn run(
             tags,
             description,
             remind,
+            per_day,
         } => {
             if remind.is_some() {
                 ensure_module(store, "notify")?;
+            }
+            if !(1..=habit::model::MAX_TARGET).contains(&per_day) {
+                bail!(
+                    "--per-day must be between 1 and {}",
+                    habit::model::MAX_TARGET
+                );
             }
             let schedule = parse_schedule(weekly, days)?;
             let reminder = remind.as_deref().map(parse_time).transpose()?;
@@ -353,6 +376,7 @@ pub fn run(
             let index =
                 data.add_habit_full(&name, schedule, start, ends, &tags, description.as_deref())?;
             data.habits[index].reminder = reminder;
+            data.habits[index].target = per_day;
             let habit = &data.habits[index];
             store.save(data)?;
             println!(
@@ -370,41 +394,77 @@ pub fn run(
                 print_reminder_guidance();
             }
         }
-        Command::Done { habit, date } => {
+        Command::Done { habit, date, count } => {
             let index = data.resolve_index(&habit)?;
-            let target = date.unwrap_or(today);
+            let day = date.unwrap_or(today);
             let habit = data.habits[index].clone();
-            if target > today {
-                bail!("{target} is in the future; nothing to check off yet");
+            if day > today {
+                bail!("{day} is in the future; nothing to check off yet");
             }
-            ensure_active(&habit, target)?;
-            if data.log.is_done(target, &habit.id) {
+            ensure_active(&habit, day)?;
+            let target = habit.per_day();
+            let current = data.log.count_on(day, &habit.id);
+            let wanted = match count {
+                Some(value) => {
+                    if value > target {
+                        bail!("{} needs at most {target} per day", habit.name);
+                    }
+                    value
+                }
+                None => (current + 1).min(target),
+            };
+            if wanted == current {
                 println!(
-                    "{} was already done on {target} · {}",
+                    "{} is already {current}/{target} on {day} · {}",
                     habit.name,
                     streak_summary(&habit, data, today, config)
                 );
                 return Ok(());
             }
-            data.log.set(target, &habit.id, true);
+            data.log.set_count(day, &habit.id, wanted);
             store.save(data)?;
+            let marker = if wanted >= target { "✓" } else { "◐" };
             println!(
-                "✓ {} on {target} · {}",
+                "{marker} {} {wanted}/{target} on {day} · {}",
                 habit.name,
                 streak_summary(&habit, data, today, config)
             );
         }
-        Command::Undo { habit, date } => {
+        Command::Undo { habit, date, all } => {
             let index = data.resolve_index(&habit)?;
-            let target = date.unwrap_or(today);
+            let day = date.unwrap_or(today);
             let habit = data.habits[index].clone();
-            if !data.log.is_done(target, &habit.id) {
-                println!("{} was not checked off on {target}", habit.name);
+            let current = data.log.count_on(day, &habit.id);
+            if current == 0 {
+                println!("{} was not checked off on {day}", habit.name);
                 return Ok(());
             }
-            data.log.set(target, &habit.id, false);
+            let wanted = if all { 0 } else { current - 1 };
+            data.log.set_count(day, &habit.id, wanted);
             store.save(data)?;
-            println!("✗ {} undone on {target}", habit.name);
+            if wanted == 0 {
+                println!("✗ {} undone on {day}", habit.name);
+            } else {
+                println!("◐ {} now {wanted}/{} on {day}", habit.name, habit.per_day());
+            }
+        }
+        Command::PerDay { habit, value } => {
+            let index = data.resolve_index(&habit)?;
+            let name = data.habits[index].name.clone();
+            match value {
+                None => println!("{name} needs {}/day", data.habits[index].per_day()),
+                Some(value) => {
+                    if !(1..=habit::model::MAX_TARGET).contains(&value) {
+                        bail!("per-day must be between 1 and {}", habit::model::MAX_TARGET);
+                    }
+                    data.habits[index].target = value;
+                    data.habits[index].validate()?;
+                    let id = data.habits[index].id.clone();
+                    data.log.clamp_habit(&id, value);
+                    store.save(data)?;
+                    println!("{name} now needs {value}/day");
+                }
+            }
         }
         Command::Cheat { habit, date, off } => {
             let index = data.resolve_index(&habit)?;
@@ -1248,16 +1308,20 @@ fn print_list(data: &Data, today: NaiveDate, config: &Config, tags: &[String]) -
         pad_right("SCHEDULE", 13)
     );
     for habit in &rows {
+        let count = data.log.count_on(today, &habit.id);
+        let target = habit.per_day();
         let marker = if habit.archived || habit.is_finished(today) {
-            "·"
-        } else if data.log.is_done(today, &habit.id) {
-            "✓"
+            "·".to_string()
+        } else if target > 1 {
+            format!("{count}/{target}")
+        } else if count >= target {
+            "✓".to_string()
         } else if data.cheats.is_excused(today, &habit.id) {
-            "◆"
+            "◆".to_string()
         } else if habit.schedule.is_due(today) && habit.is_active_on(today) {
-            "○"
+            "○".to_string()
         } else {
-            "·"
+            "·".to_string()
         };
         let streak = stats::current_streak(habit, &data.history(), today, config.week_start);
         let streak_label = if streak.length == 0 {
@@ -1277,7 +1341,7 @@ fn print_list(data: &Data, today: NaiveDate, config: &Config, tags: &[String]) -
             pad_right(&habit.id, id_width),
             pad_right(&habit.name, name_width),
             pad_right(&habit.schedule.describe(), 13),
-            pad_left(marker, 5),
+            pad_left(&marker, 5),
             pad_right(&streak_label, 10),
             state
         );
@@ -1381,18 +1445,24 @@ fn print_log(data: &Data, today: NaiveDate, count: u32, all: bool) {
     let mut printed = 0;
     for back in 0..count {
         let date = today - Duration::days(i64::from(back));
-        let ids = data.log.ids_on(date);
+        let counts = data.log.counts_on(date);
         let cheats = data.cheats.ids_on(date);
-        if ids.is_empty() && cheats.is_empty() && !all {
+        if counts.is_empty() && cheats.is_empty() && !all {
             continue;
         }
-        let names: Vec<String> = ids
+        let names: Vec<String> = counts
             .iter()
-            .filter_map(|id| {
+            .filter_map(|(id, count)| {
                 data.habits
                     .iter()
                     .find(|habit| habit.id == *id)
-                    .map(|habit| habit.name.clone())
+                    .map(|habit| {
+                        if habit.per_day() > 1 {
+                            format!("{} {count}/{}", habit.name, habit.per_day())
+                        } else {
+                            habit.name.clone()
+                        }
+                    })
             })
             .collect();
         let excused: Vec<String> = cheats
@@ -1479,6 +1549,7 @@ mod tests {
             tags: Vec::new(),
             description: None,
             remind: None,
+            per_day: 1,
         }
     }
 
@@ -1630,6 +1701,7 @@ mod tests {
             Command::Done {
                 habit: "gym".into(),
                 date: None,
+                count: None,
             },
             &store,
             &mut data,
@@ -1638,6 +1710,68 @@ mod tests {
         )
         .unwrap();
         assert!(store.load().unwrap().log.is_done(today, "gym"));
+    }
+
+    #[test]
+    fn done_count_records_a_partial_day() {
+        let (_dir, store) = store();
+        let mut data = Data::default();
+        let today = date("2026-11-10");
+        run(add("Water"), &store, &mut data, today, &Config::default()).unwrap();
+        run(
+            Command::PerDay {
+                habit: "water".into(),
+                value: Some(3),
+            },
+            &store,
+            &mut data,
+            today,
+            &Config::default(),
+        )
+        .unwrap();
+        run(
+            Command::Done {
+                habit: "water".into(),
+                date: None,
+                count: Some(2),
+            },
+            &store,
+            &mut data,
+            today,
+            &Config::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            store.load().unwrap().log.count_on(today, "water"),
+            2,
+            "two of three is recorded as two"
+        );
+        run(
+            Command::Done {
+                habit: "water".into(),
+                date: None,
+                count: None,
+            },
+            &store,
+            &mut data,
+            today,
+            &Config::default(),
+        )
+        .unwrap();
+        assert_eq!(store.load().unwrap().log.count_on(today, "water"), 3);
+        run(
+            Command::Undo {
+                habit: "water".into(),
+                date: None,
+                all: false,
+            },
+            &store,
+            &mut data,
+            today,
+            &Config::default(),
+        )
+        .unwrap();
+        assert_eq!(store.load().unwrap().log.count_on(today, "water"), 2);
     }
 
     #[test]
@@ -1650,6 +1784,7 @@ mod tests {
             Command::Done {
                 habit: "gym".into(),
                 date: Some(date("2026-11-11")),
+                count: None,
             },
             &store,
             &mut data,
@@ -1696,6 +1831,7 @@ mod tests {
                 tags: vec!["Health".into(), "morning".into()],
                 description: Some("20 pages".into()),
                 remind: None,
+                per_day: 1,
             },
             &store,
             &mut data,

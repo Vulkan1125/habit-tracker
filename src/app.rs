@@ -811,7 +811,8 @@ impl App {
             KeyCode::Char('k') | KeyCode::Up => self.move_cursor(-1),
             KeyCode::Char('g') | KeyCode::Home => self.cursor = 0,
             KeyCode::Char('G') | KeyCode::End => self.cursor = usize::MAX,
-            KeyCode::Char(' ') => self.toggle_selected(),
+            KeyCode::Char(' ') => self.add_entry_selected(),
+            KeyCode::Char('-') => self.remove_entry_selected(),
             KeyCode::Char('c') => self.toggle_cheat_selected(),
             KeyCode::Char('[') => self.shift_day(-1),
             KeyCode::Char(']') => self.shift_day(1),
@@ -956,27 +957,131 @@ impl App {
         });
 
         if now_done {
-            let progress =
-                stats::weekly_progress(&habit, &self.data.history(), self.today, self.week_start);
-            let suffix = match progress {
-                Some((done, target)) => format!("{done}/{target} this week"),
-                None => {
-                    let streak = stats::current_streak(
-                        &habit,
-                        &self.data.history(),
-                        self.today,
-                        self.week_start,
-                    );
-                    format!("streak {}", streak.label())
-                }
-            };
             self.flash_ok(format!(
-                "✓ {}{} · {suffix} · n adds a note",
+                "✓ {}{} · {} · n adds a note",
+                self.day_prefix(date),
+                habit.name,
+                self.progress_note(&habit)
+            ));
+        } else {
+            self.flash_ok(format!("✗ {}{} undone", self.day_prefix(date), habit.name));
+        }
+    }
+
+    /// Space adds one entry to a counted habit, or checks off a plain one.
+    fn add_entry_selected(&mut self) {
+        let Some(index) = self.selected() else {
+            self.flash_err("nothing selected");
+            return;
+        };
+        let habit = self.data.habits[index].clone();
+        if habit.per_day() == 1 {
+            self.toggle_selected();
+            return;
+        }
+        let date = self.view_date;
+        if date > self.today {
+            self.flash_err("that day is in the future");
+            return;
+        }
+        if !habit.is_active_on(date) {
+            self.flash_err(format!(
+                "{} was not running on {date} ({})",
+                habit.name,
+                habit.window_label()
+            ));
+            return;
+        }
+        let target = habit.per_day();
+        let current = self.data.log.count_on(date, &habit.id);
+        if current >= target {
+            self.flash_ok(format!(
+                "✓ {}{} is already {target}/{target} · press - for one less",
+                self.day_prefix(date),
+                habit.name
+            ));
+            return;
+        }
+
+        let mut now = current;
+        self.mutate(|data| {
+            now = data.log.increment(date, &habit.id, target);
+        });
+
+        if now >= target {
+            self.flash_ok(format!(
+                "✓ {}{} {now}/{target} · {} · n adds a note",
+                self.day_prefix(date),
+                habit.name,
+                self.progress_note(&habit)
+            ));
+        } else {
+            self.flash_ok(format!(
+                "◐ {}{} {now}/{target} today · {target} needed",
+                self.day_prefix(date),
+                habit.name
+            ));
+        }
+    }
+
+    /// The `-` key takes one entry back, down to zero.
+    fn remove_entry_selected(&mut self) {
+        let Some(index) = self.selected() else {
+            self.flash_err("nothing selected");
+            return;
+        };
+        let habit = self.data.habits[index].clone();
+        let date = self.view_date;
+        if date > self.today {
+            self.flash_err("that day is in the future");
+            return;
+        }
+        if !habit.is_active_on(date) {
+            self.flash_err(format!(
+                "{} was not running on {date} ({})",
+                habit.name,
+                habit.window_label()
+            ));
+            return;
+        }
+        let target = habit.per_day();
+        let current = self.data.log.count_on(date, &habit.id);
+        if current == 0 {
+            self.flash_err(format!(
+                "{}{} has nothing to remove",
+                self.day_prefix(date),
+                habit.name
+            ));
+            return;
+        }
+
+        let mut now = current;
+        self.mutate(|data| {
+            now = data.log.decrement(date, &habit.id);
+        });
+
+        if target > 1 {
+            self.flash_ok(format!(
+                "◐ {}{} {now}/{target} today",
                 self.day_prefix(date),
                 habit.name
             ));
         } else {
             self.flash_ok(format!("✗ {}{} undone", self.day_prefix(date), habit.name));
+        }
+    }
+
+    /// The weekly quota or streak shown after a change.
+    fn progress_note(&self, habit: &Habit) -> String {
+        let progress =
+            stats::weekly_progress(habit, &self.data.history(), self.today, self.week_start);
+        match progress {
+            Some((done, target)) => format!("{done}/{target} this week"),
+            None => {
+                let streak =
+                    stats::current_streak(habit, &self.data.history(), self.today, self.week_start);
+                format!("streak {}", streak.label())
+            }
         }
     }
 
@@ -1212,15 +1317,19 @@ impl App {
                 updated.note = draft.note;
                 updated.reminder = reminder;
                 updated.tags = draft.tags;
+                updated.target = draft.target;
                 if let Err(error) = updated.validate() {
                     self.flash_err(error.to_string());
                     return;
                 }
                 let display = updated.name.clone();
+                let id = updated.id.clone();
+                let target = updated.target;
                 self.mutate(move |data| {
                     if let Some(habit) = data.habits.get_mut(index) {
                         *habit = updated;
                     }
+                    data.log.clamp_habit(&id, target);
                 });
                 self.flash_ok(format!("updated {display}"));
                 self.after_reminder_change(!was_enabled && reminder.is_some());
@@ -1237,6 +1346,7 @@ impl App {
                 ) {
                     Ok(index) => {
                         self.data.habits[index].reminder = reminder;
+                        self.data.habits[index].target = draft.target;
                         let id = self.data.habits[index].id.clone();
                         let display = self.data.habits[index].name.clone();
                         if self.commit(before) {
@@ -2186,6 +2296,28 @@ mod tests {
         app.toggle_selected();
         assert!(!app.data.log.is_done(date("2026-10-26"), "gym"));
         assert!(app.flash.as_ref().unwrap().text.contains("not running"));
+    }
+
+    #[test]
+    fn space_adds_one_entry_and_dash_takes_one_back() {
+        let mut app = app();
+        app.data.habits[0].target = 3;
+
+        app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.data.log.count_on(date("2026-11-10"), "gym"), 1);
+        assert!(app.flash.as_ref().unwrap().text.contains("1/3"));
+
+        for _ in 0..3 {
+            app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+                .unwrap();
+        }
+        assert_eq!(app.data.log.count_on(date("2026-11-10"), "gym"), 3);
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('-'), KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.data.log.count_on(date("2026-11-10"), "gym"), 2);
+        assert!(app.flash.as_ref().unwrap().text.contains("2/3"));
     }
 
     #[test]

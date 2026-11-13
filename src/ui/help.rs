@@ -10,7 +10,8 @@ use habit::format::pad_right;
 use habit::theme::Theme;
 
 const KEYS: &[(&str, &str)] = &[
-    ("space", "check off / undo the selected day"),
+    ("space", "check off, or add one to a counted habit"),
+    ("-", "take one entry back"),
     ("c", "cheat day (one per month)"),
     ("[ ]", "previous / next day"),
     ("t", "back to today"),

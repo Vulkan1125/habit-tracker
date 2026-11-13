@@ -13,7 +13,25 @@ use chrono::{NaiveDate, NaiveTime};
 use crate::model::{Data, Habit, Schedule};
 
 /// Column order, also written as the header row.
-pub const COLUMNS: [&str; 12] = [
+pub const COLUMNS: [&str; 14] = [
+    "habit_id",
+    "habit_name",
+    "schedule",
+    "start",
+    "end",
+    "tags",
+    "description",
+    "reminder",
+    "archived",
+    "date",
+    "status",
+    "note",
+    "per_day",
+    "count",
+];
+
+/// The pre-counted export. Still accepted on import, with one entry per day.
+const LEGACY_COLUMNS: [&str; 12] = [
     "habit_id",
     "habit_name",
     "schedule",
@@ -55,33 +73,38 @@ pub fn export(data: &Data) -> String {
     out.push('\n');
 
     for habit in &data.habits {
-        let mut events: Vec<(NaiveDate, RowStatus, &str)> = Vec::new();
+        let mut events: Vec<(NaiveDate, RowStatus, &str, u32)> = Vec::new();
         for date in data.log.dates_for(&habit.id) {
-            events.push((date, RowStatus::Done, ""));
+            events.push((
+                date,
+                RowStatus::Done,
+                "",
+                data.log.count_on(date, &habit.id),
+            ));
         }
         for date in data.cheats.dates_for(&habit.id) {
-            events.push((date, RowStatus::Cheat, ""));
+            events.push((date, RowStatus::Cheat, "", 0));
         }
         for (date, text) in &habit.notes {
-            events.push((*date, RowStatus::Note, text.as_str()));
+            events.push((*date, RowStatus::Note, text.as_str(), 0));
         }
-        events.sort_by_key(|(date, status, _)| (*date, status.rank()));
+        events.sort_by_key(|(date, status, _, _)| (*date, status.rank()));
 
         if events.is_empty() {
             write_row(&mut out, habit, None);
         } else {
-            for (date, status, text) in events {
-                write_row(&mut out, habit, Some((date, status, text)));
+            for (date, status, text, count) in events {
+                write_row(&mut out, habit, Some((date, status, text, count)));
             }
         }
     }
     out
 }
 
-fn write_row(out: &mut String, habit: &Habit, event: Option<(NaiveDate, RowStatus, &str)>) {
-    let (date, status, note) = match event {
-        Some((date, status, note)) => (date.to_string(), status.label(), note),
-        None => (String::new(), "", ""),
+fn write_row(out: &mut String, habit: &Habit, event: Option<(NaiveDate, RowStatus, &str, u32)>) {
+    let (date, status, note, count) = match event {
+        Some((date, status, note, count)) => (date.to_string(), status.label(), note, count),
+        None => (String::new(), "", "", 0),
     };
     let fields = [
         habit.id.clone(),
@@ -99,6 +122,8 @@ fn write_row(out: &mut String, habit: &Habit, event: Option<(NaiveDate, RowStatu
         date,
         status.to_string(),
         note.to_string(),
+        habit.per_day().to_string(),
+        count.to_string(),
     ];
     for (index, field) in fields.iter().enumerate() {
         if index > 0 {
@@ -186,8 +211,9 @@ pub fn import(data: &mut Data, text: &str) -> Result<ImportReport> {
         match row.status {
             RowStatus::None => {}
             RowStatus::Done => {
-                if !data.log.is_done(date, &row.id) {
-                    data.log.set(date, &row.id, true);
+                let wanted = row.count.clamp(1, habit.per_day());
+                if data.log.count_on(date, &row.id) < wanted {
+                    data.log.set_count(date, &row.id, wanted);
                     report.checkins += 1;
                 }
             }
@@ -247,6 +273,7 @@ fn create_habit(data: &mut Data, row: &Row, row_no: usize) -> Result<usize> {
     habit.archived = row.archived;
     habit.note = row.description.clone();
     habit.reminder = row.reminder;
+    habit.target = row.per_day;
     for tag in &row.tags {
         habit.add_tag(tag);
     }
@@ -256,8 +283,9 @@ fn create_habit(data: &mut Data, row: &Row, row_no: usize) -> Result<usize> {
 }
 
 fn check_header(header: &[String]) -> Result<()> {
-    let expected = COLUMNS.to_vec();
-    if header != expected {
+    let current = COLUMNS.to_vec();
+    let legacy = LEGACY_COLUMNS.to_vec();
+    if header != current && header != legacy {
         bail!(
             "not a habit CSV: expected the header {}, found {}",
             COLUMNS.join(","),
@@ -306,6 +334,7 @@ struct Metadata {
     description: Option<String>,
     reminder: Option<NaiveTime>,
     archived: bool,
+    per_day: u32,
 }
 
 struct Row {
@@ -321,11 +350,13 @@ struct Row {
     date: Option<NaiveDate>,
     status: RowStatus,
     note: String,
+    per_day: u32,
+    count: u32,
 }
 
 impl Row {
     fn parse(fields: &[String]) -> Result<Row> {
-        if fields.len() != COLUMNS.len() {
+        if fields.len() != COLUMNS.len() && fields.len() != LEGACY_COLUMNS.len() {
             bail!(
                 "expected {} columns, found {} (check for an unquoted comma)",
                 COLUMNS.len(),
@@ -366,6 +397,33 @@ impl Row {
             other => bail!("unknown status \"{other}\" (use done, cheat or note)"),
         };
         let note = field(11).to_string();
+        let legacy = fields.len() == LEGACY_COLUMNS.len();
+        let per_day = if legacy {
+            1
+        } else {
+            match field(12) {
+                "" => 1,
+                raw => raw
+                    .parse()
+                    .with_context(|| format!("per_day must be a number, found \"{raw}\""))?,
+            }
+        };
+        if !(1..=crate::model::MAX_TARGET).contains(&per_day) {
+            bail!("per_day must be between 1 and {}", crate::model::MAX_TARGET);
+        }
+        let count = if legacy {
+            u32::from(status == RowStatus::Done)
+        } else {
+            match field(13) {
+                "" => u32::from(status == RowStatus::Done),
+                raw => raw
+                    .parse()
+                    .with_context(|| format!("count must be a number, found \"{raw}\""))?,
+            }
+        };
+        if status == RowStatus::Done && count == 0 {
+            bail!("a done row needs a count of at least 1");
+        }
 
         if status == RowStatus::None && date.is_some() {
             bail!("a row with a date needs a status");
@@ -390,6 +448,8 @@ impl Row {
             date,
             status,
             note,
+            per_day,
+            count,
         })
     }
 
@@ -403,6 +463,7 @@ impl Row {
             description: self.description.clone(),
             reminder: self.reminder,
             archived: self.archived,
+            per_day: self.per_day,
         }
     }
 }
@@ -541,6 +602,42 @@ mod tests {
     }
 
     #[test]
+    fn counted_habits_keep_their_counts_through_csv() {
+        let mut data = Data::default();
+        let index = data
+            .add_habit("Water", Schedule::Daily, date("2026-11-01"))
+            .unwrap();
+        data.habits[index].target = 3;
+        let id = data.habits[index].id.clone();
+        data.log.set_count(date("2026-11-10"), &id, 2);
+
+        let text = export(&data);
+        assert!(text.contains("per_day,count"), "{text}");
+        let mut restored = Data::default();
+        import(&mut restored, &text).unwrap();
+        assert_eq!(restored, data);
+        assert_eq!(
+            restored.log.count_on(date("2026-11-10"), &id),
+            2,
+            "two of three survives the trip"
+        );
+    }
+
+    #[test]
+    fn the_old_twelve_column_export_still_imports() {
+        let text = format!(
+            "{}\nwater,Water,daily,2026-11-01,,,,,false,2026-11-10,done,\n",
+            LEGACY_COLUMNS.join(",")
+        );
+        let mut data = Data::default();
+        let report = import(&mut data, &text).unwrap();
+        assert_eq!(report.habits_added, 1);
+        assert_eq!(report.checkins, 1);
+        assert_eq!(data.habits[0].per_day(), 1);
+        assert!(data.log.is_done(date("2026-11-10"), "water"));
+    }
+
+    #[test]
     fn importing_twice_changes_nothing_the_second_time() {
         let original = sample();
         let text = export(&original);
@@ -563,7 +660,7 @@ mod tests {
         write_row(
             &mut row,
             &original.habits[0],
-            Some((date("2026-11-05"), RowStatus::Done, "")),
+            Some((date("2026-11-05"), RowStatus::Done, "", 1)),
         );
         text.push_str(&row);
 

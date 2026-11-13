@@ -103,7 +103,9 @@ fn rows<'a>(data: &'a Data, today: NaiveDate, month: NaiveDate, week_start: Day)
                 while week <= end {
                     let from = week.max(start);
                     let to = (week + Duration::days(6)).min(end);
-                    let count = history.log.count_between(&habit.id, from, to);
+                    let count = history
+                        .log
+                        .reached_between(&habit.id, habit.per_day(), from, to);
                     done += count;
                     if count >= u32::from(n) {
                         met += 1;
@@ -123,7 +125,7 @@ fn rows<'a>(data: &'a Data, today: NaiveDate, month: NaiveDate, week_start: Day)
                         && !history.cheats.is_excused(date, &habit.id)
                     {
                         possible += 1;
-                        if history.log.is_done(date, &habit.id) {
+                        if history.reached(habit, date) {
                             done += 1;
                         }
                     }
@@ -188,7 +190,7 @@ fn performance(data: &Data, today: NaiveDate, month: NaiveDate) -> Vec<DayPoint>
                     done += 1;
                     possible += 1;
                 }
-                Status::Missed | Status::Pending => possible += 1,
+                Status::Missed | Status::Pending | Status::Partial => possible += 1,
                 _ => {}
             }
             if let Some(note) = habit.note_on(date) {
@@ -393,6 +395,7 @@ fn percent(done: u32, possible: u32) -> u32 {
 fn status_label(status: Status) -> &'static str {
     match status {
         Status::Done => "done",
+        Status::Partial => "partial",
         Status::Cheat => "excused",
         Status::Missed => "missed",
         Status::Pending => "open",
@@ -403,6 +406,7 @@ fn status_label(status: Status) -> &'static str {
 fn status_class(status: Status) -> &'static str {
     match status {
         Status::Done => "done",
+        Status::Partial => "pending",
         Status::Cheat => "cheat",
         Status::Missed => "missed",
         Status::Pending => "pending",
@@ -514,7 +518,11 @@ pub fn render(
     let mut habits_html = String::new();
     for row in &rows {
         let habit = row.habit;
-        let schedule = habit.schedule.describe();
+        let schedule = if habit.per_day() > 1 {
+            format!("{} · {}/day", habit.schedule.describe(), habit.per_day())
+        } else {
+            habit.schedule.describe()
+        };
         let tags = if habit.tags.is_empty() {
             String::new()
         } else {

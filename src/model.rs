@@ -5,11 +5,14 @@ use std::fmt;
 
 use anyhow::{Context, Result, bail};
 use chrono::{Datelike, Duration, NaiveDate, NaiveTime, Weekday};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Bumped whenever the on-disk shape changes, so an older build refuses the file
 /// instead of silently dropping fields it does not know about.
-pub const DATA_VERSION: u32 = 4;
+pub const DATA_VERSION: u32 = 5;
+
+/// Most entries one habit can require on a single day.
+pub const MAX_TARGET: u32 = 99;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Day {
@@ -224,6 +227,17 @@ pub struct Habit {
     /// Dated journal entries, one per day, newest first when iterated in reverse.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub notes: BTreeMap<NaiveDate, String>,
+    /// Entries needed on each due day. `1` is a plain check-off.
+    #[serde(default = "default_target", skip_serializing_if = "is_one")]
+    pub target: u32,
+}
+
+fn default_target() -> u32 {
+    1
+}
+
+fn is_one(value: &u32) -> bool {
+    *value == 1
 }
 
 /// Store a reminder as `HH:MM` rather than chrono's `HH:MM:SS`, because the
@@ -280,7 +294,18 @@ impl Habit {
             reminder: None,
             tags: Vec::new(),
             notes: BTreeMap::new(),
+            target: 1,
         }
+    }
+
+    /// Entries required on a due day, treating a malformed `0` as one.
+    pub fn per_day(&self) -> u32 {
+        self.target.clamp(1, MAX_TARGET)
+    }
+
+    /// Whether the log holds enough entries for `date` to count as done.
+    pub fn reached_on(&self, log: &Log, date: NaiveDate) -> bool {
+        log.count_on(date, &self.id) >= self.per_day()
     }
 
     /// Inside the habit's lifetime: on or after the start, on or before the end.
@@ -356,6 +381,9 @@ impl Habit {
     /// Validates the schedule and the date window together.
     pub fn validate(&self) -> Result<()> {
         self.schedule.validate()?;
+        if !(1..=MAX_TARGET).contains(&self.target) {
+            bail!("per-day target must be between 1 and {MAX_TARGET}");
+        }
         if let Some(ends) = self.ends
             && ends < self.created
         {
@@ -426,44 +454,74 @@ impl TagError {
     }
 }
 
-/// Completion history: `date -> set of habit ids`.
+/// Completion history: `date -> habit id -> entries recorded`.
 ///
-/// Stored as a map so the JSON stays small, sorted and easy to hand-edit.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(transparent)]
+/// One entry is a check-off, so a habit that asks for three a day can hold
+/// `2` here and still be honestly "two of three". Days where every habit has
+/// exactly one entry serialise as a plain list, which keeps ordinary files as
+/// small and readable as they were before counted habits existed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Log {
-    entries: BTreeMap<NaiveDate, BTreeSet<String>>,
+    entries: BTreeMap<NaiveDate, BTreeMap<String, u32>>,
 }
 
 impl Log {
-    pub fn is_done(&self, date: NaiveDate, habit_id: &str) -> bool {
+    /// Entries recorded for the habit on `date`.
+    pub fn count_on(&self, date: NaiveDate, habit_id: &str) -> u32 {
         self.entries
             .get(&date)
-            .is_some_and(|ids| ids.contains(habit_id))
+            .and_then(|counts| counts.get(habit_id))
+            .copied()
+            .unwrap_or(0)
+    }
+
+    /// Whether anything at all was recorded on `date`. Use [`Habit::reached_on`]
+    /// when the habit's per-day target matters.
+    pub fn is_done(&self, date: NaiveDate, habit_id: &str) -> bool {
+        self.count_on(date, habit_id) > 0
     }
 
     pub fn set(&mut self, date: NaiveDate, habit_id: &str, done: bool) {
-        if done {
-            self.entries
-                .entry(date)
-                .or_default()
-                .insert(habit_id.to_string());
+        self.set_count(date, habit_id, u32::from(done));
+    }
+
+    /// Set the exact number of entries, removing the day when it reaches zero.
+    pub fn set_count(&mut self, date: NaiveDate, habit_id: &str, count: u32) {
+        if count == 0 {
+            let now_empty = match self.entries.get_mut(&date) {
+                Some(counts) => {
+                    counts.remove(habit_id);
+                    counts.is_empty()
+                }
+                None => false,
+            };
+            if now_empty {
+                self.entries.remove(&date);
+            }
             return;
         }
 
-        let now_empty = match self.entries.get_mut(&date) {
-            Some(ids) => {
-                ids.remove(habit_id);
-                ids.is_empty()
-            }
-            None => false,
-        };
-        if now_empty {
-            self.entries.remove(&date);
-        }
+        self.entries
+            .entry(date)
+            .or_default()
+            .insert(habit_id.to_string(), count);
     }
 
-    /// Flips `date`, returning the new state.
+    /// Add one entry, never going past `target`. Returns the new count.
+    pub fn increment(&mut self, date: NaiveDate, habit_id: &str, target: u32) -> u32 {
+        let count = (self.count_on(date, habit_id) + 1).min(target.max(1));
+        self.set_count(date, habit_id, count);
+        count
+    }
+
+    /// Remove one entry, never going below zero. Returns the new count.
+    pub fn decrement(&mut self, date: NaiveDate, habit_id: &str) -> u32 {
+        let count = self.count_on(date, habit_id).saturating_sub(1);
+        self.set_count(date, habit_id, count);
+        count
+    }
+
+    /// Flips a plain check-off, returning the new state.
     pub fn toggle(&mut self, date: NaiveDate, habit_id: &str) -> bool {
         let done = !self.is_done(date, habit_id);
         self.set(date, habit_id, done);
@@ -473,24 +531,45 @@ impl Log {
     pub fn ids_on(&self, date: NaiveDate) -> Vec<&str> {
         self.entries
             .get(&date)
-            .map(|ids| ids.iter().map(String::as_str).collect())
+            .map(|counts| counts.keys().map(String::as_str).collect())
             .unwrap_or_default()
     }
 
-    pub fn count_between(&self, habit_id: &str, from: NaiveDate, to: NaiveDate) -> u32 {
+    /// Habit ids and their counts for `date`, sorted by id.
+    pub fn counts_on(&self, date: NaiveDate) -> Vec<(&str, u32)> {
+        self.entries
+            .get(&date)
+            .map(|counts| {
+                counts
+                    .iter()
+                    .map(|(id, count)| (id.as_str(), *count))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Days in the range where the habit recorded at least `target` entries.
+    pub fn reached_between(
+        &self,
+        habit_id: &str,
+        target: u32,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> u32 {
         if from > to {
             return 0;
         }
+        let target = target.max(1);
         self.entries
             .range(from..=to)
-            .filter(|(_, ids)| ids.contains(habit_id))
+            .filter(|(_, counts)| counts.get(habit_id).is_some_and(|count| *count >= target))
             .count() as u32
     }
 
     pub fn first_date_for(&self, habit_id: &str) -> Option<NaiveDate> {
         self.entries
             .iter()
-            .find(|(_, ids)| ids.contains(habit_id))
+            .find(|(_, counts)| counts.contains_key(habit_id))
             .map(|(date, _)| *date)
     }
 
@@ -498,23 +577,84 @@ impl Log {
     pub fn dates_for(&self, habit_id: &str) -> Vec<NaiveDate> {
         self.entries
             .iter()
-            .filter(|(_, ids)| ids.contains(habit_id))
+            .filter(|(_, counts)| counts.contains_key(habit_id))
             .map(|(date, _)| *date)
             .collect()
     }
 
+    /// Every entry ever recorded for the habit, so counted days contribute more
+    /// than one.
     pub fn total_for(&self, habit_id: &str) -> u32 {
         self.entries
             .values()
-            .filter(|ids| ids.contains(habit_id))
-            .count() as u32
+            .filter_map(|counts| counts.get(habit_id))
+            .sum()
     }
 
     pub fn remove_habit(&mut self, habit_id: &str) {
-        self.entries.retain(|_, ids| {
-            ids.remove(habit_id);
-            !ids.is_empty()
+        self.entries.retain(|_, counts| {
+            counts.remove(habit_id);
+            !counts.is_empty()
         });
+    }
+
+    /// Lower any recorded counts that exceed a habit's new per-day target.
+    pub fn clamp_habit(&mut self, habit_id: &str, target: u32) {
+        let target = target.max(1);
+        for counts in self.entries.values_mut() {
+            if let Some(count) = counts.get_mut(habit_id) {
+                *count = (*count).min(target);
+            }
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum DayEntries {
+    Listed(BTreeSet<String>),
+    Counted(BTreeMap<String, u32>),
+}
+
+impl Serialize for Log {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use serde::ser::SerializeMap;
+
+        let mut map = serializer.serialize_map(Some(self.entries.len()))?;
+        for (date, counts) in &self.entries {
+            if counts.values().all(|count| *count == 1) {
+                let ids: Vec<&String> = counts.keys().collect();
+                map.serialize_entry(date, &ids)?;
+            } else {
+                map.serialize_entry(date, counts)?;
+            }
+        }
+        map.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Log {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = BTreeMap::<NaiveDate, DayEntries>::deserialize(deserializer)?;
+        let mut entries = BTreeMap::new();
+        for (date, day) in raw {
+            let counts: BTreeMap<String, u32> = match day {
+                DayEntries::Listed(ids) => ids.into_iter().map(|id| (id, 1)).collect(),
+                DayEntries::Counted(counts) => counts,
+            };
+            let counts: BTreeMap<String, u32> =
+                counts.into_iter().filter(|(_, count)| *count > 0).collect();
+            if !counts.is_empty() {
+                entries.insert(date, counts);
+            }
+        }
+        Ok(Self { entries })
     }
 }
 
@@ -628,6 +768,13 @@ impl Cheats {
 pub struct History<'a> {
     pub log: &'a Log,
     pub cheats: &'a Cheats,
+}
+
+impl History<'_> {
+    /// Whether the habit's per-day target was met on `date`.
+    pub fn reached(&self, habit: &Habit, date: NaiveDate) -> bool {
+        habit.reached_on(self.log, date)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -850,7 +997,7 @@ impl Data {
                 !habit.archived
                     && habit.is_active_on(today)
                     && !habit.is_finished(today)
-                    && self.log.is_done(today, &habit.id)
+                    && habit.reached_on(&self.log, today)
             })
             .count()
     }
@@ -960,6 +1107,78 @@ mod tests {
         assert!(!log.toggle(day, "gym"));
         assert!(!log.is_done(day, "gym"));
         assert!(log.ids_on(day).is_empty());
+    }
+
+    #[test]
+    fn counts_are_capped_and_plain_days_still_serialise_as_lists() {
+        let mut log = Log::default();
+        let day = date("2026-11-10");
+        assert_eq!(log.increment(day, "water", 3), 1);
+        assert_eq!(log.increment(day, "water", 3), 2);
+        assert_eq!(log.increment(day, "water", 3), 3);
+        assert_eq!(log.increment(day, "water", 3), 3);
+        assert_eq!(log.decrement(day, "water"), 2);
+        assert_eq!(log.count_on(day, "water"), 2);
+        assert!(log.is_done(day, "water"));
+        assert!(!log.is_done(day, "gym"));
+        log.set(day, "gym", true);
+
+        let json = serde_json::to_string(&log).unwrap();
+        assert!(json.contains("\"gym\":1"), "{json}");
+        assert!(json.contains("\"water\":2"), "{json}");
+
+        let loaded: Log = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.count_on(day, "water"), 2);
+        assert!(loaded.is_done(day, "gym"));
+        assert_eq!(loaded.total_for("water"), 2);
+    }
+
+    #[test]
+    fn legacy_list_entries_load_as_one_each() {
+        let log: Log = serde_json::from_str(r#"{"2026-11-10":["gym","read"]}"#).unwrap();
+        assert!(log.is_done(date("2026-11-10"), "gym"));
+        assert!(log.is_done(date("2026-11-10"), "read"));
+        assert_eq!(log.count_on(date("2026-11-10"), "gym"), 1);
+        assert_eq!(log.ids_on(date("2026-11-10")), vec!["gym", "read"]);
+
+        let plain = serde_json::to_string(&log).unwrap();
+        assert_eq!(plain, r#"{"2026-11-10":["gym","read"]}"#);
+    }
+
+    #[test]
+    fn a_target_defaults_to_one_and_is_left_out_of_the_file() {
+        let habit = Habit::new(
+            "water".into(),
+            "Water".into(),
+            Schedule::Daily,
+            date("2026-11-10"),
+        );
+        assert_eq!(habit.per_day(), 1);
+        let json = serde_json::to_string(&habit).unwrap();
+        assert!(!json.contains("target"), "{json}");
+
+        let loaded: Habit =
+            serde_json::from_str(r#"{"id":"water","name":"Water","schedule":{"kind":"daily"},"created":"2026-11-10","target":3}"#)
+                .unwrap();
+        assert_eq!(loaded.per_day(), 3);
+    }
+
+    #[test]
+    fn reached_between_counts_only_days_that_met_the_target() {
+        let mut log = Log::default();
+        let monday = date("2026-11-09");
+        log.set_count(monday, "water", 2);
+        log.set_count(monday + Duration::days(1), "water", 3);
+        log.set_count(monday + Duration::days(2), "water", 1);
+        assert_eq!(
+            log.reached_between("water", 3, monday, monday + Duration::days(2)),
+            1
+        );
+        assert_eq!(
+            log.reached_between("water", 1, monday, monday + Duration::days(2)),
+            3
+        );
+        assert_eq!(log.total_for("water"), 6);
     }
 
     #[test]

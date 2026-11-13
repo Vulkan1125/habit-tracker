@@ -64,7 +64,7 @@ pub fn pending(
                 && habit.is_active_on(today)
                 && !habit.is_finished(today)
                 && habit.schedule.is_due(today)
-                && !data.log.is_done(today, &habit.id)
+                && !habit.reached_on(&data.log, today)
                 && !data.cheats.is_excused(today, &habit.id)
                 && match stats::weekly_progress(habit, &history, today, week_start) {
                     Some((done, target)) => done < u32::from(target),

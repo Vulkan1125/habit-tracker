@@ -1,10 +1,10 @@
 # habit
 
-**A feature-rich habit tracker that stays calm in the terminal.** Streaks, weekly quotas, cheat
-days, tags, descriptions, dated notes, per-habit reminders, monthly HTML reports and a heatmap,
-plus a plain JSON file you can read, diff, `grep` and script against. **Minimal to begin. Depth on
-demand.** The core is one small binary, reminders and reports are optional modules, and there is no
-daemon, no account and no network access.
+**A feature-rich habit tracker that stays calm in the terminal.** Streaks, weekly quotas, counted
+habits, cheat days, tags, descriptions, dated notes, per-habit reminders, monthly HTML reports and a
+heatmap, plus a plain JSON file you can read, diff, `grep` and script against. **Minimal to begin.
+Depth on demand.** The core is one small binary, reminders and reports are optional modules, and
+there is no daemon, no account and no network access.
 
 [![CI](https://github.com/Vulkan1125/habit-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/Vulkan1125/habit-tracker/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -23,10 +23,10 @@ state. The TUI can now act on any past day, so backfilling no longer needs a sec
 ### Minimal to begin. Depth on demand.
 
 `habit add "Gym"` and `habit done gym` are close to the whole learning curve; the TUI opens with one
-command and needs no config file. Quotas, weekday schedules, start and end dates, cheat days, tags,
-descriptions, dated notes, reminders, reports and themes are all there when you reach for them,
-and turning one on never changes the file format or hides the basics. Reminders and reports arrive
-as modules, so a plain install stays a single small binary until you ask for more.
+command and needs no config file. Quotas, weekday schedules, counted habits, start and end dates,
+cheat days, tags, descriptions, dated notes, reminders, reports and themes are all there when you
+reach for them, and turning one on never changes the file format or hides the basics. Reminders and
+reports arrive as modules, so a plain install stays a single small binary until you ask for more.
 
 ### Optional modules: install what you need
 
@@ -102,12 +102,39 @@ habit cheat gym --off           # remove it again
 - If you backfill an *earlier* cheat into a month that already has one, the earlier date becomes the
   excused one and the UI warns that the later one now breaks the streak.
 
+### Counted habits: once, twice, or three litres
+
+Not every habit is a yes/no. Some need several entries in a day: three litres of water, two walks,
+eight glasses. Set a **per-day** target and each entry is recorded separately, so a day that reached
+two of three says exactly that instead of pretending it was done or missed.
+
+```sh
+habit add "Drink water" --per-day 3
+habit done water --count 2      # two of three so far
+habit done water                # one more, now three of three
+habit undo water                # take one back, now two
+habit per-day water 4           # change the target; existing counts are clamped
+habit list                      # TODAY reads 2/3 for that habit
+```
+
+In the TUI, `space` adds one entry and `-` takes one back. A counted row shows its progress next to
+the name (`2/3`) and its marker is `◐` until the target is met, then `●`. Partial days appear in the
+dot strip and heatmap as partial, not as full completions: streaks and completion rates still need
+the whole target, while the detail pane always shows the honest `2/3`. The add/edit dialog's
+**Per day** field sets the target; leave it empty or at `1` for a plain check-off.
+
+Counted habits compose with schedules: a `Mon/Wed/Fri` habit with `Per day 3` needs three entries on
+each of those days, and a `2×/week` quota counts a day toward the weekly target only once its
+per-day target is met. A cheat day still excuses the whole day.
+
 ### Streak rules, explicitly
 
 - A day that is **not due** is skipped, not counted as a miss.
 - **Today** being unfinished never breaks a streak; it renders as `◌` (open) rather than a miss.
 - **Quota habits** count complete weeks. A half-finished week leaves the streak at its previous
   value instead of zeroing it, and the list shows `2/4 wk` meanwhile.
+- **Counted habits** need their full per-day target. `2/3` is partial: it shows up honestly but does
+  not extend the streak or count as a completed day.
 - Days **before the start date** and **after the end date** are never shown as misses.
 - **The first cheat day** in a calendar month is skipped; any later one counts as a miss.
 - Checking off a **non-due day** is allowed and counts as extra credit (useful after a reshuffle).
@@ -170,7 +197,8 @@ single token can offer alternatives: `#health|#fitness` matches habits with eith
   under the cursor, or merges it into another tag after asking. The Archive tab groups closed
   habits under **Archived** and **Ended**.
 - **Habit rows** with the selected day's marker, a 7-day dot strip and weekly quota progress.
-  Habits with an end date replace the schedule label with a countdown (`51d left`, `last day`,
+  Counted habits also show their `2/3` progress, and a partial day gets `◐` until the target is
+  met. Habits with an end date replace the schedule label with a countdown (`51d left`, `last day`,
   `ended`), turning amber in the final three days.
 - **Date navigation** (`[` `]`, `t` for today): check off, excuse, inspect or annotate any past day.
 - **Detail pane** with `description:` directly under the habit title, and the description text,
@@ -181,9 +209,10 @@ single token can offer alternatives: `#health|#fitness` matches habits with eith
   inside the dialog to file it under another date (never the future, never before the habit's
   start); empty input removes the note and edits are covered by undo.
 - **Hideable bottom bar**: `b` reclaims the hint line and gives the panes one more row.
-- **Add/edit dialog** with schedule picker, weekday toggles, start/end dates, a reminder time, tags
-  and description, all validated inline. A time in **Remind** is what opts a habit into
-  notifications; leaving it empty keeps it silent.
+- **Add/edit dialog** with schedule picker, weekday toggles, a per-day target, start/end dates, a
+  reminder time, tags and description, all validated inline. A time in **Remind** is what opts a
+  habit into notifications; leaving it empty keeps it silent. **Per day** is `1` unless you are
+  counting entries.
 - **Instant feedback** in the status line, including streak effects and a warning when a second
   cheat in a month will break the run.
 - **One-step undo** for every mutation: check-off, cheat, add, edit, rename/merge a tag, archive
@@ -240,6 +269,15 @@ added Gym [gym] · 4×/week · since 2026-09-14
 
 $ habit done gym
 ✓ Gym on 2026-11-10 · 1/4 this week
+
+$ habit add "Drink water" --per-day 3
+added Drink water [drink-water] · every day · since 2026-11-10
+
+$ habit done water --count 2
+◐ Drink water 2/3 on 2026-11-10 · streak 0 days
+
+$ habit done water
+✓ Drink water 3/3 on 2026-11-10 · streak 1 day
 
 $ habit cheat gym --date 2026-11-06
 ◆ Gym on 2026-11-06 · excused (1/1 cheat day in November)
@@ -508,6 +546,7 @@ Nothing else to configure. The data file is created on the first change.
 | Glyph | Meaning |
 | --- | --- |
 | `●` | done on the selected day (list, dot strip, heatmap) |
+| `◐` | some entries recorded, but fewer than the per-day target |
 | `○` | due but open in the row marker; a missed day in the dot strip; the colour tells them apart |
 | `◆` | cheat day (the excused first one in the month) |
 | `░` | a missed day in the heatmap |
@@ -516,12 +555,14 @@ Nothing else to configure. The data file is created on the first change.
 | `▸` | selected row |
 | `████░░░░` | progress bar: filled / remaining |
 | `1/4 wk` | weekly quota progress for `n×/week` habits |
+| `2/3` | entries recorded out of a counted habit's per-day target |
 
 ### Keys
 
 | Key | Action |
 | --- | --- |
-| `space` | check off / un-check the selected day (`n` then adds a note) |
+| `space` | check off a plain habit, or add one entry to a counted habit (`n` then adds a note) |
+| `-` | take one entry back from the selected day |
 | `tab` | cycle the left pane through Habits, Tags and Archive |
 | `n` | write or edit a note; the dialog's date field can move it to any past day |
 | `b` | show or hide the bottom bar |
@@ -546,11 +587,11 @@ Nothing else to configure. The data file is created on the first change.
 
 In the add/edit dialog: `tab` / `shift-tab` moves between fields, `←→` changes the schedule kind,
 `space` toggles a weekday, `enter` saves, `esc` cancels. The fields are name, schedule, weekday
-selection, weekly quota, start date, end date, reminder time, tags and description; leave
-**Remind** empty to keep notifications off. Without the notifications module the **Remind** row is
-not shown at all.
+selection, weekly quota, per-day target, start date, end date, reminder time, tags and description;
+leave **Remind** empty to keep notifications off. Without the notifications module the **Remind**
+row is not shown at all.
 
-![The add/edit dialog, with start, end and reminder fields](docs/screenshots/form.png)
+![The add/edit dialog, with per-day target, start, end and reminder fields](docs/screenshots/form.png)
 
 The help overlay lists every key:
 
@@ -568,9 +609,10 @@ Global flags, usable before or after the subcommand:
 | Command | Arguments | What it does |
 | --- | --- | --- |
 | `habit` | | open the TUI |
-| `habit add <NAME>` | `--weekly N` / `-w N`, `--days mon,wed`, `--start D`, `--end D`, `--tag TAG` (repeatable), `--description TEXT` (`--note` still works), `--remind HH:MM` | create a habit; defaults to daily, starting today, no reminder |
-| `habit done <HABIT>` | `--date YYYY-MM-DD` | check off today or backfill a day |
-| `habit undo <HABIT>` | `--date YYYY-MM-DD` | un-check a day |
+| `habit add <NAME>` | `--weekly N` / `-w N`, `--days mon,wed`, `--per-day N`, `--start D`, `--end D`, `--tag TAG` (repeatable), `--description TEXT` (`--note` still works), `--remind HH:MM` | create a habit; defaults to daily, starting today, one entry per day, no reminder |
+| `habit done <HABIT>` | `--date YYYY-MM-DD`, `--count N` | check off today, add one entry to a counted habit, or set the day's total with `--count` |
+| `habit undo <HABIT>` | `--date YYYY-MM-DD`, `--all` | take one entry back, or clear the whole day with `--all` |
+| `habit per-day <HABIT>` | `N` | print or change the number of entries needed per due day |
 | `habit cheat <HABIT>` | `--date YYYY-MM-DD`, `--off` | mark or remove an excused day |
 | `habit list` | `--tag TAG` (repeatable; `a\|b` for either) | table of habits, today's status and streaks |
 | `habit stats` | `--habit <HABIT>`, `--days N` (default 30) | streak, week, completion, check-ins, cheats |
@@ -654,12 +696,13 @@ Resolution order for the data file:
 3. `$XDG_DATA_HOME/habit/data.json` (only if absolute)
 4. `$HOME/.local/share/habit/data.json`
 
-Format (version 4): habits carry their window, reminder and metadata; `log` and `cheats` are
-parallel maps from date to habit ids, and `notes` maps a date to that habit's journal entry:
+Format (version 5): habits carry their window, reminder and metadata; `log` maps a date to each
+habit's entries, and `cheats` maps a date to habit ids; `notes` maps a date to that habit's journal
+entry. A day with one entry per habit stays a plain list, while a counted day uses an object:
 
 ```json
 {
-  "version": 4,
+  "version": 5,
   "habits": [
     {
       "id": "gym",
@@ -680,11 +723,19 @@ parallel maps from date to habit ids, and `notes` maps a date to that habit's jo
       "schedule": { "kind": "weekdays", "days": ["Mon", "Tue", "Wed", "Thu", "Fri"] },
       "created": "2026-09-14",
       "ends": "2026-12-31"
+    },
+    {
+      "id": "water",
+      "name": "Drink water",
+      "schedule": { "kind": "daily" },
+      "created": "2026-11-01",
+      "target": 3
     }
   ],
   "log": {
     "2026-11-09": ["gym", "read-20-pages"],
-    "2026-11-10": ["gym"]
+    "2026-11-10": ["gym"],
+    "2026-11-11": { "water": 2 }
   },
   "cheats": {
     "2026-11-06": ["gym"],
@@ -694,15 +745,16 @@ parallel maps from date to habit ids, and `notes` maps a date to that habit's jo
 ```
 
 Ids are slugified from the name (`Morning Walk!` → `morning-walk`) and suffixed on collision
-(`morning-walk-2`). Optional fields (`ends`, `archived`, `note`, `reminder`, `tags`, `notes`) are
-omitted when empty, so a habit without a reminder keeps the old shape. The `note` field is the
-habit's description; dated entries live under `notes`.
+(`morning-walk-2`). Optional fields (`ends`, `archived`, `note`, `reminder`, `tags`, `notes`,
+`target`) are omitted when empty or at their default, so a plain habit keeps the old shape and a
+plain day stays a list. `target` is omitted when it is `1`; the `note` field is the habit's
+description, while dated entries live under `notes`.
 The first cheat for a habit in a calendar month is the excused one; the map itself stores every
 marked day so the UI can show and explain the second.
 
 **Editing by hand is supported**: keep it valid JSON, then press `r` in the TUI or just run another
-command. Empty or whitespace-only files are treated as “no data”. Older (version 1, 2 or 3) files
-load with the new fields defaulted and are written back as version 4.
+command. Empty or whitespace-only files are treated as “no data”. Older (version 1–4) files load
+with the new fields defaulted and are written back as version 5.
 
 ### CSV export and import
 
@@ -716,12 +768,14 @@ habit import habits.csv
 ```
 
 The columns are `habit_id, habit_name, schedule, start, end, tags, description, reminder, archived,
-date, status, note`. Schedules use `daily`, `days:mon,wed` or `weekly:4`; tags are separated with
-`;`. Import is additive and safe: a known `habit_id` keeps its local metadata and only gains the
-events it is missing, so running the same import twice changes nothing. An unknown id is created
-with its exported id and metadata, and a name clash with a *different* id is refused rather than
-silently duplicated. Standard CSV quoting handles commas, quotes and newlines in descriptions and
-notes.
+date, status, note, per_day, count`. Schedules use `daily`, `days:mon,wed` or `weekly:4`; tags are
+separated with `;`. A `done` row's `count` says how many entries it recorded, and `per_day` carries
+the habit's target. Exports from before counted habits (12 columns, ending at `note`) still import,
+with every check-in treated as one entry. Import is additive and safe: a known `habit_id` keeps its
+local metadata and only gains the events it is missing, so running the same import twice changes
+nothing. An unknown id is created with its exported id and metadata, and a name clash with a
+*different* id is refused rather than silently duplicated. Standard CSV quoting handles commas,
+quotes and newlines in descriptions and notes.
 
 ## Configuration
 

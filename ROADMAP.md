@@ -257,7 +257,8 @@ file, drop the fields it does not know about on the next save, and lose data qui
 that old build refuses the file with a clear error instead, and the original is still on disk as
 `data.json.bak`.
 
-Implemented in 0.2.0 and extended in 0.3.0, 0.6.0 and 0.7.0 (format 4 added `reminder`): an older
-file loads with defaults for the new fields and is stamped as the current version on the next save,
-while a future version is refused. Every feature lands with tests in
-`stats.rs` (or wherever the logic belongs) and, where it renders, a `TestBackend` frame test.
+Implemented in 0.2.0 and extended in 0.3.0, 0.6.0 and 0.7.0 (format 4 added `reminder`); format 5
+added counted entries and the per-day `target`. An older file loads with defaults for the new fields
+and is stamped as the current version on the next save, while a future version is refused. Every
+feature lands with tests in `stats.rs` (or wherever the logic belongs) and, where it renders, a
+`TestBackend` frame test.

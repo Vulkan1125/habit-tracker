@@ -161,15 +161,15 @@ fn hint(app: &App, max_width: usize) -> String {
             "j k move · enter open · e rename · tab next · ? help · q quit".to_string()
         }
         Mode::Normal if app.tab == Tab::Archive => {
-            "d restore · space · n note · e edit · x delete · u undo · tab next · ? help"
+            "d restore · space add · n note · e edit · x delete · u undo · tab next · ? help"
                 .to_string()
         }
         Mode::Normal => {
-            let full = "space toggle · n note · c cheat · [ ] day · t today · tab pane · a add · e edit · d archive · x delete · u undo · / filter · b bar · T theme · m mode · ? help · q quit";
+            let full = "space add · - one less · n note · c cheat · [ ] day · t today · tab pane · a add · e edit · d archive · x delete · u undo · / filter · b bar · T theme · m mode · ? help · q quit";
             if width(full) <= max_width {
                 return full.to_string();
             }
-            let medium = "space toggle · n note · tab · b bar · / filter · ? help · q quit";
+            let medium = "space add · - less · n note · tab · b bar · / filter · ? help · q quit";
             if width(medium) <= max_width {
                 return medium.to_string();
             }
@@ -868,6 +868,7 @@ mod tests {
         app.mode = Mode::Form(Box::new(form::Form::new_with(date(), false)));
         let screen = render(&mut app, 90, 30);
         assert!(screen.contains("Description"), "{screen}");
+        assert!(screen.contains("Tags"), "{screen}");
         assert!(!screen.contains("Remind"), "{screen}");
     }
 

@@ -17,6 +17,8 @@ pub enum Status {
     Cheat,
     /// Today is due but still open, so it is not a miss yet.
     Pending,
+    /// Some entries are recorded, but fewer than the habit's per-day target.
+    Partial,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -55,8 +57,12 @@ pub fn status_on(habit: &Habit, history: &History, date: NaiveDate, today: Naive
     if !habit.is_active_on(date) {
         return Status::NotDue;
     }
-    if history.log.is_done(date, &habit.id) {
+    let count = history.log.count_on(date, &habit.id);
+    if count >= habit.per_day() {
         return Status::Done;
+    }
+    if count > 0 {
+        return Status::Partial;
     }
     if history.cheats.is_excused(date, &habit.id) {
         return Status::Cheat;
@@ -135,7 +141,7 @@ fn daily_streak(habit: &Habit, history: &History, today: NaiveDate) -> Streak {
 
     while date >= floor && walked < 20_000 {
         if habit.schedule.is_due(date) && habit.is_active_on(date) {
-            if history.log.is_done(date, &habit.id) {
+            if history.reached(habit, date) {
                 length += 1;
             } else if history.cheats.is_excused(date, &habit.id) {
                 // Excused: skipped, exactly like a day that is not due.
@@ -170,8 +176,9 @@ fn weekly_streak(
     let mut walked = 0u32;
 
     while week >= first_week && walked < 2_000 {
-        let done = history.log.count_between(
+        let done = history.log.reached_between(
             &habit.id,
+            habit.per_day(),
             week.max(habit.created),
             (week + Duration::days(6)).min(last_day),
         );
@@ -211,8 +218,9 @@ pub fn longest_streak(
             let (mut best, mut current) = (0, 0);
             let mut walked = 0u32;
             while week <= last_week && walked < 2_000 {
-                let done = history.log.count_between(
+                let done = history.log.reached_between(
                     &habit.id,
+                    habit.per_day(),
                     week.max(habit.created),
                     (week + Duration::days(6)).min(last_day),
                 );
@@ -236,7 +244,7 @@ pub fn longest_streak(
             let mut walked = 0u32;
             while date <= last_day && walked < 20_000 {
                 if habit.schedule.is_due(date) && habit.is_active_on(date) {
-                    if history.log.is_done(date, &habit.id) {
+                    if history.reached(habit, date) {
                         current += 1;
                         best = best.max(current);
                     } else if history.cheats.is_excused(date, &habit.id) {
@@ -297,8 +305,9 @@ pub fn completion(
             let mut week = first_week;
             let mut walked = 0u32;
             while week <= last_week && walked < 2_000 {
-                done += history.log.count_between(
+                done += history.log.reached_between(
                     &habit.id,
+                    habit.per_day(),
                     week.max(from),
                     (week + Duration::days(6)).min(last_day),
                 );
@@ -319,7 +328,7 @@ pub fn completion(
                         // counted as neither done nor possible
                     } else {
                         possible += 1;
-                        if history.log.is_done(date, &habit.id) {
+                        if history.reached(habit, date) {
                             done += 1;
                         }
                     }
@@ -344,8 +353,9 @@ pub fn weekly_progress(
     let last_day = scope_end(habit, today);
     // A finished habit keeps showing the week it ended in.
     let week = start_of_week(last_day, week_start);
-    let done = history.log.count_between(
+    let done = history.log.reached_between(
         &habit.id,
+        habit.per_day(),
         week.max(habit.created),
         (week + Duration::days(6)).min(last_day),
     );
@@ -387,8 +397,9 @@ pub fn weekly_history(
     let mut history_weeks = Vec::new();
     let mut week = from;
     while week <= last_week {
-        let done = history.log.count_between(
+        let done = history.log.reached_between(
             &habit.id,
+            habit.per_day(),
             week.max(habit.created),
             (week + Duration::days(6)).min(last_day),
         );
@@ -420,7 +431,7 @@ pub fn week_progress(
     let mut date = week;
     while date <= last_day {
         if habit.schedule.is_due(date) && habit.is_active_on(date) {
-            if history.log.is_done(date, &habit.id) {
+            if history.reached(habit, date) {
                 target += 1;
                 done += 1;
             } else if history.cheats.is_excused(date, &habit.id) {
@@ -488,6 +499,14 @@ mod tests {
         fn done(mut self, dates: &[&str]) -> Self {
             for day in dates {
                 self.log.set(date(day), "h", true);
+            }
+            self
+        }
+
+        fn counts(mut self, per_day: u32, entries: &[(&str, u32)]) -> Self {
+            self.habit.target = per_day;
+            for (day, count) in entries {
+                self.log.set_count(date(day), "h", *count);
             }
             self
         }
@@ -747,6 +766,50 @@ mod tests {
                 date("2026-11-10")
             ),
             Status::Missed
+        );
+    }
+
+    #[test]
+    fn partial_entries_are_neither_done_nor_a_full_miss() {
+        let f = Fixture::new(Schedule::Daily, "2026-11-01").counts(
+            3,
+            &[("2026-11-09", 2), ("2026-11-10", 2), ("2026-11-08", 3)],
+        );
+        let history = f.history();
+        assert_eq!(
+            status_on(&f.habit, &history, date("2026-11-09"), date("2026-11-10")),
+            Status::Partial
+        );
+        assert_eq!(
+            status_on(&f.habit, &history, date("2026-11-10"), date("2026-11-10")),
+            Status::Partial
+        );
+        assert_eq!(
+            status_on(&f.habit, &history, date("2026-11-08"), date("2026-11-10")),
+            Status::Done
+        );
+    }
+
+    #[test]
+    fn a_counted_streak_needs_the_full_target_each_day() {
+        let f = Fixture::new(Schedule::Daily, "2026-11-01").counts(
+            3,
+            &[("2026-11-08", 3), ("2026-11-09", 2), ("2026-11-10", 3)],
+        );
+        let streak = current_streak(&f.habit, &f.history(), date("2026-11-10"), Day::Mon);
+        assert_eq!(streak.length, 1, "the 9th was only two of three");
+        let completion = completion(&f.habit, &f.history(), date("2026-11-10"), Day::Mon, 3);
+        assert_eq!(completion.done, 2);
+        assert_eq!(completion.possible, 3);
+    }
+
+    #[test]
+    fn a_counted_quota_habit_needs_the_target_on_a_day_to_count_it() {
+        let f = Fixture::new(Schedule::TimesPerWeek { n: 2 }, "2026-11-09")
+            .counts(3, &[("2026-11-09", 2), ("2026-11-10", 3)]);
+        assert_eq!(
+            weekly_progress(&f.habit, &f.history(), date("2026-11-10"), Day::Mon),
+            Some((1, 2))
         );
     }
 

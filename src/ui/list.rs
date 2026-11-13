@@ -160,6 +160,9 @@ fn habit_list(frame: &mut Frame, area: Rect, app: &mut App) {
             Style::default().fg(theme.dim),
         ))));
     } else {
+        let show_counts = rows.iter().any(
+            |row| matches!(row, ListRow::Habit(index) if app.data.habits[*index].per_day() > 1),
+        );
         for row in &rows {
             match row {
                 ListRow::Heading(label) => items.push(ListItem::new(Line::from(Span::styled(
@@ -175,6 +178,7 @@ fn habit_list(frame: &mut Frame, area: Rect, app: &mut App) {
                     &app.data.habits[*index],
                     app,
                     row_width,
+                    show_counts,
                 ))),
             }
         }
@@ -305,18 +309,21 @@ fn highlight(theme: Theme) -> Style {
     }
 }
 
-fn row_line(habit: &Habit, app: &App, inner_width: usize) -> Line<'static> {
+fn row_line(habit: &Habit, app: &App, inner_width: usize, show_counts: bool) -> Line<'static> {
     let theme = app.theme;
     let date = app.view_date;
-    let done = app.data.log.is_done(date, &habit.id);
+    let count = app.data.log.count_on(date, &habit.id);
+    let target = habit.per_day();
     let excused = app.data.cheats.is_excused(date, &habit.id);
     let due = habit.schedule.is_due(date) && habit.is_active_on(date);
     let closed = habit.archived || habit.is_finished(app.today);
 
     let (marker, marker_style) = if closed {
         ("·", Style::default().fg(theme.dim))
-    } else if done {
+    } else if count >= target {
         ("●", Style::default().fg(theme.done))
+    } else if count > 0 {
+        ("◐", Style::default().fg(theme.warn))
     } else if excused {
         ("◆", Style::default().fg(theme.cheat))
     } else if due {
@@ -355,8 +362,9 @@ fn row_line(habit: &Habit, app: &App, inner_width: usize) -> Line<'static> {
     };
     let show_schedule = inner_width >= 34;
     let schedule_width = if show_schedule { 13 } else { 0 };
+    let count_width = if show_counts { 5 } else { 0 };
     let name_width = inner_width
-        .saturating_sub(2 + schedule_width + DOTS_WIDTH)
+        .saturating_sub(2 + count_width + schedule_width + DOTS_WIDTH)
         .max(4);
 
     let name_style = if closed {
@@ -371,6 +379,20 @@ fn row_line(habit: &Habit, app: &App, inner_width: usize) -> Line<'static> {
         Span::styled(pad_right(&habit.name, name_width), name_style),
     ];
 
+    if show_counts {
+        let text = if target > 1 {
+            format!(" {count}/{target}")
+        } else {
+            String::new()
+        };
+        let style = if target > 1 && count >= target {
+            Style::default().fg(theme.done)
+        } else {
+            Style::default().fg(theme.warn)
+        };
+        spans.push(Span::styled(pad_right(&text, count_width), style));
+    }
+
     if show_schedule {
         spans.push(Span::styled(
             pad_right(&schedule, schedule_width),
@@ -381,6 +403,7 @@ fn row_line(habit: &Habit, app: &App, inner_width: usize) -> Line<'static> {
     for (_, status) in stats::recent(habit, &app.data.history(), date, DOTS) {
         let (glyph, style) = match status {
             Status::Done => ("●", Style::default().fg(theme.done)),
+            Status::Partial => ("◐", Style::default().fg(theme.warn)),
             Status::Cheat => ("◆", Style::default().fg(theme.cheat)),
             Status::Missed => ("○", Style::default().fg(theme.missed)),
             Status::Pending => ("◌", Style::default().fg(theme.warn)),

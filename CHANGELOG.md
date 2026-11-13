@@ -6,12 +6,25 @@ All notable changes to `habit` are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Counted habits.** A habit can ask for several entries on each due day, such as three litres of
+  water or two walks. `habit add "Drink water" --per-day 3` sets the target, `habit done water
+  --count 2` records a partial day, `habit done water` adds one more, `habit undo water` takes one
+  back, and `habit per-day water 4` changes the target. In the TUI, `space` adds an entry and `-`
+  removes one; rows show `2/3`, partial days use `◐`, and the detail pane shows the honest count.
+  Partial days do not extend a streak. The CSV export gains `per_day` and `count` columns and still
+  imports the old 12-column files. Data format version 5.
+
 ### Fixed
 
+- **The Tags row is visible again in the add/edit dialog** when the notifications module is not
+  installed. The layout asked for one more row than the popup had, so the Tags row was squeezed to
+  zero height.
 - **The Arch package install no longer fails with `invalid option '--quiet'`.** `pacman -U` rejects
   that flag, so the installer now uses `--noprogressbar` for quieter output instead.
 
-## [0.11.0] (2026-11-11
+## [0.11.0] (2026-11-11)
 
 ### Added
 
@@ -26,7 +39,7 @@ All notable changes to `habit` are recorded here. The format follows
   theme accent, status cells take their text colour from the page background, and `terminal` and
   `mono` keep worked-out neutral and grey variants.
 
-## [0.10.0] (2026-11-11
+## [0.10.0] (2026-11-11)
 
 ### Added
 
@@ -49,7 +62,7 @@ All notable changes to `habit` are recorded here. The format follows
   with their quiet flags, so a successful install no longer prints pages of compiler and package
   manager output; the useful “installing Rust”, “compiling” and “rust ready” lines remain.
 
-## [0.9.1] (2026-11-11
+## [0.9.1] (2026-11-11)
 
 ### Fixed
 
@@ -58,7 +71,7 @@ All notable changes to `habit` are recorded here. The format follows
 - A CSV import no longer replaces a dated note that already exists locally; imports only fill in
   missing history, matching the additive promise for check-ins and cheat days.
 
-## [0.9.0] (2026-11-11
+## [0.9.0] (2026-11-11)
 
 ### Added
 
@@ -79,7 +92,7 @@ All notable changes to `habit` are recorded here. The format follows
 - `habit list --tag` accepts `|` inside one argument for OR, while repeating `--tag` still requires
   every tag. The help overlay and README describe the new syntax.
 
-## [0.8.0] (2026-11-11
+## [0.8.0] (2026-11-11)
 
 ### Added
 
@@ -122,7 +135,7 @@ All notable changes to `habit` are recorded here. The format follows
 - Release archives, `.deb`/`.rpm`/Arch packages and the Homebrew formula now ship `habit`,
   `habit-notify` and `habit-report` together.
 
-## [0.7.0] (2026-11-11
+## [0.7.0] (2026-11-11)
 
 ### Added
 
@@ -154,7 +167,7 @@ All notable changes to `habit` are recorded here. The format follows
 - The add/edit dialog has a **Remind** field between the end date and the tags, and the detail pane
   shows the time beside the schedule.
 
-## [0.6.0] (2026-11-11
+## [0.6.0] (2026-11-11)
 
 ### Added
 
@@ -177,7 +190,7 @@ All notable changes to `habit` are recorded here. The format follows
 - The Habits tab's tab-bar count now matches its list: archived, finished and future-start habits
   are left out.
 
-## [0.5.0] (2026-11-10
+## [0.5.0] (2026-11-10)
 
 ### Added
 
@@ -194,7 +207,7 @@ All notable changes to `habit` are recorded here. The format follows
 
 - `u` (undo) now works on the Tags tab too, where it used to be swallowed by the tag list.
 
-## [0.4.1] (2026-11-10
+## [0.4.1] (2026-11-10)
 
 ### Fixed
 
@@ -204,7 +217,7 @@ All notable changes to `habit` are recorded here. The format follows
   miss and cheat marks and the week dots stayed green, amber and red on the selected row while
   every other theme showed them in the row colour.
 
-## [0.4.0] (2026-11-10
+## [0.4.0] (2026-11-10)
 
 ### Added
 
@@ -232,7 +245,7 @@ All notable changes to `habit` are recorded here. The format follows
 - CI runs `shellcheck` on the installer, and every release attaches `install.sh` alongside the
   packages, with `SHA256SUMS` covering it too.
 
-## [0.3.3] (2026-11-10
+## [0.3.3] (2026-11-10)
 
 ### Changed
 
@@ -240,7 +253,7 @@ All notable changes to `habit` are recorded here. The format follows
   description text, so the title is followed by one visually aligned block. Streak, heatmap, notes
   and everything below are unchanged.
 
-## [0.3.2] (2026-11-10
+## [0.3.2] (2026-11-10)
 
 ### Added
 
@@ -254,7 +267,7 @@ All notable changes to `habit` are recorded here. The format follows
 - The detail pane renders `description:` on its own line with up to three wrapped description lines
   indented beneath it. Streak, heatmap, notes and everything below are unchanged.
 
-## [0.3.1] (2026-11-10
+## [0.3.1] (2026-11-10)
 
 ### Added
 
@@ -266,7 +279,7 @@ All notable changes to `habit` are recorded here. The format follows
 - The habit **description** now sits directly under the title in the detail pane instead of at the
   bottom, followed by the schedule, tags, streak, heatmap and dated notes.
 
-## [0.3.0] (2026-11-10
+## [0.3.0] (2026-11-10)
 
 The tag-and-journal release: a second left-pane tab for tags, dated notes on every day, and a
 clearer name for the per-habit free text.
@@ -300,7 +313,7 @@ clearer name for the per-habit free text.
 - Test count is now **129**, covering tag counts, the archive split, mouse hit-testing, note
   round-trips, `esc` backing out of a tag view and the rename.
 
-## [0.2.1] (2026-11-10
+## [0.2.1] (2026-11-10)
 
 ### Added
 
@@ -317,7 +330,7 @@ clearer name for the per-habit free text.
 - `cargo install --path .` is the supported way to update an existing install; the 0.2.0 notes did
   not mention that an older binary on `PATH` keeps showing the old UI.
 
-## [0.2.0] (2026-11-10
+## [0.2.0] (2026-11-10)
 
 The feature release: habits gain a lifetime, cheat days, tags, notes, a trend line, date
 navigation and a full visual pass with seven palettes in light and dark mode.
@@ -373,7 +386,7 @@ navigation and a full visual pass with seven palettes in light and dark mode.
 - An unchanged tag is reported as such rather than pretending it was added.
 - The TUI filter no longer treats `#` tokens as literal name text.
 
-## [0.1.0] (2026-11-10
+## [0.1.0] (2026-11-10)
 
 First release.
 
