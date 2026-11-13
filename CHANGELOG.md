@@ -6,6 +6,10 @@ All notable changes to `habit` are recorded here. The format follows
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.12.0] (2026-11-13)
+
 ### Added
 
 - **Counted habits.** A habit can ask for several entries on each due day, such as three litres of
