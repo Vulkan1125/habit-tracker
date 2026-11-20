@@ -11,7 +11,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, List, ListItem, Paragraph};
 
 use crate::app::{App, ListRow, NoteKind, Tab};
-use habit::format::{pad_right, truncate, width, wrap};
+use habit::format::{pad_right, width, wrap};
 use habit::model::Habit;
 use habit::stats::{self, Status};
 use habit::theme::Theme;
@@ -85,7 +85,14 @@ fn draw_tabs(frame: &mut Frame, area: Rect, app: &mut App) {
         })
         .count();
     let tags_count = app.tags().len();
-    let notes_count: usize = app.data.habits.iter().map(|habit| habit.notes.len()).sum();
+    let notes_count = match app.note_habit {
+        Some(index) => app
+            .data
+            .habits
+            .get(index)
+            .map_or(0, |habit| habit.notes.len()),
+        None => app.data.habits.iter().map(|habit| habit.notes.len()).sum(),
+    };
     let archive_count = app
         .data
         .habits
@@ -251,13 +258,52 @@ fn tag_habits(frame: &mut Frame, area: Rect, app: &mut App, tag: &str) {
 fn note_list(frame: &mut Frame, area: Rect, app: &mut App) {
     let theme = app.theme;
     let notes = app.notes();
-    let row_width = area.width.saturating_sub(2) as usize;
+    let habit = app.note_habit.and_then(|index| app.data.habits.get(index));
+    let header = Rect {
+        x: area.x,
+        y: area.y,
+        width: area.width,
+        height: 1,
+    };
+    let header_line = match habit {
+        Some(habit) => Line::from(vec![
+            Span::styled(
+                format!(" {}", habit.name),
+                Style::default()
+                    .fg(theme.habit_accent(&habit.id))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" · {} notes", habit.notes.len()),
+                Style::default().fg(theme.dim),
+            ),
+        ]),
+        None => Line::from(Span::styled(
+            " No habit selected",
+            Style::default().fg(theme.dim),
+        )),
+    };
+    frame.render_widget(Paragraph::new(header_line).style(theme.base()), header);
+
+    let list_area = Rect {
+        x: area.x,
+        y: area.y + 1,
+        width: area.width,
+        height: area.height.saturating_sub(1),
+    };
+    app.hits.list = Some(list_area);
+    if list_area.height == 0 {
+        return;
+    }
+    let row_width = list_area.width.saturating_sub(2) as usize;
     let mut items: Vec<ListItem> = Vec::with_capacity(notes.len().max(1));
     let mut heights: Vec<(usize, u16)> = Vec::with_capacity(notes.len());
 
     if notes.is_empty() {
-        let message = if app.data.habits.iter().all(|habit| habit.notes.is_empty()) {
-            "No notes yet: press n on a habit to add one"
+        let message = if habit.is_none() {
+            "Go to the Habits tab and pick a habit"
+        } else if habit.is_some_and(|habit| habit.notes.is_empty()) {
+            "No notes yet: press n to add one"
         } else if app.filter.is_empty() {
             "Nothing to show"
         } else {
@@ -275,20 +321,10 @@ fn note_list(frame: &mut Frame, area: Rect, app: &mut App) {
                 NoteKind::Missed => ("× ", Style::default().fg(theme.missed)),
                 NoteKind::Normal => ("", Style::default().fg(theme.fg)),
             };
-            let name_width = row_width.saturating_sub(12).max(4);
-            let mut lines = vec![Line::from(vec![
-                Span::styled(
-                    format!("{:<10}", date.format("%Y-%m-%d")),
-                    Style::default().fg(theme.dim),
-                ),
-                Span::raw("  "),
-                Span::styled(
-                    truncate(&habit.name, name_width),
-                    Style::default()
-                        .fg(theme.habit_accent(&habit.id))
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ])];
+            let mut lines = vec![Line::from(Span::styled(
+                format!("{:<10}", date.format("%Y-%m-%d")),
+                Style::default().fg(theme.dim),
+            ))];
             let indent = 2usize;
             let text_width = row_width.saturating_sub(indent).max(8);
             for (chunk_index, chunk) in wrap(habit.note_on(*date).unwrap_or(""), text_width, 2)
@@ -323,13 +359,13 @@ fn note_list(frame: &mut Frame, area: Rect, app: &mut App) {
         .highlight_symbol("▸ ");
 
     app.list_state.select(selected);
-    frame.render_stateful_widget(list, area, &mut app.list_state);
+    frame.render_stateful_widget(list, list_area, &mut app.list_state);
 
     // A note can span several visual lines, so record where each one landed
     // after the list has scrolled itself.
     let offset = app.list_state.offset();
-    let bottom = area.y.saturating_add(area.height);
-    let mut y = area.y;
+    let bottom = list_area.y.saturating_add(list_area.height);
+    let mut y = list_area.y;
     for (index, height) in heights {
         if index < offset {
             continue;
@@ -341,9 +377,9 @@ fn note_list(frame: &mut Frame, area: Rect, app: &mut App) {
         app.hits.note_rows.push((
             index,
             Rect {
-                x: area.x,
+                x: list_area.x,
                 y,
-                width: area.width,
+                width: list_area.width,
                 height: visible,
             },
         ));

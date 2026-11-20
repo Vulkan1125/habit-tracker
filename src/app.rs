@@ -273,6 +273,8 @@ pub struct App {
     pub tag_focus: Option<String>,
     pub tag_cursor: usize,
     pub note_cursor: usize,
+    /// The habit whose dated notes the Notes tab shows.
+    pub note_habit: Option<usize>,
     pub hits: HitAreas,
     /// Whether the one-line hint bar at the bottom is drawn.
     pub show_footer: bool,
@@ -304,6 +306,7 @@ impl App {
             tag_focus: None,
             tag_cursor: 0,
             note_cursor: 0,
+            note_habit: None,
             hits: HitAreas::default(),
             show_footer: true,
             config: config.clone(),
@@ -348,29 +351,31 @@ impl App {
         counts.into_iter().collect()
     }
 
-    /// Every dated note, newest first, as `(habit index, date)` pairs.
+    /// The selected habit's dated notes, newest first, as `(habit, date)` pairs.
     ///
-    /// The Notes tab lists them across habits; the current filter narrows by
-    /// habit text or by the note text itself.
+    /// The Notes tab is a journal for one habit at a time; the filter can still
+    /// narrow the list by habit text or by the note text itself.
     pub fn notes(&self) -> Vec<(usize, NaiveDate)> {
+        let Some(index) = self
+            .note_habit
+            .filter(|index| *index < self.data.habits.len())
+        else {
+            return Vec::new();
+        };
+        let habit = &self.data.habits[index];
         let query = self.filter.trim().to_lowercase();
-        let mut rows = Vec::new();
-        for (index, habit) in self.data.habits.iter().enumerate() {
-            if !query.is_empty()
-                && !matches_query(habit, &query)
-                && !habit
-                    .notes
-                    .values()
-                    .any(|text| text.to_lowercase().contains(&query))
-            {
-                continue;
-            }
-            rows.extend(habit.notes.keys().map(|date| (index, *date)));
+        if !query.is_empty()
+            && !matches_query(habit, &query)
+            && !habit
+                .notes
+                .values()
+                .any(|text| text.to_lowercase().contains(&query))
+        {
+            return Vec::new();
         }
-        rows.sort_by(|a, b| {
-            b.1.cmp(&a.1)
-                .then_with(|| self.data.habits[a.0].name.cmp(&self.data.habits[b.0].name))
-        });
+        let mut rows: Vec<(usize, NaiveDate)> =
+            habit.notes.keys().map(|date| (index, *date)).collect();
+        rows.sort_by_key(|row| std::cmp::Reverse(row.1));
         rows
     }
 
@@ -494,6 +499,11 @@ impl App {
             }
             return;
         }
+        // Carry the current habit through tab changes so the Notes tab keeps
+        // showing its journal even after passing through the Tags tab.
+        if let Some(index) = self.selected() {
+            self.note_habit = Some(index);
+        }
         self.tab = tab;
         self.tag_focus = None;
         self.cursor = 0;
@@ -530,6 +540,23 @@ impl App {
         }
         let current = self.note_cursor.min(length - 1) as i32;
         self.note_cursor = (current + delta).clamp(0, length as i32 - 1) as usize;
+    }
+
+    /// Change which habit's notes the Notes tab is showing.
+    fn move_note_habit(&mut self, delta: i32) {
+        let order = self.data.display_order(self.today);
+        if order.is_empty() {
+            self.note_habit = None;
+            self.note_cursor = 0;
+            return;
+        }
+        let current = self
+            .note_habit
+            .and_then(|index| order.iter().position(|candidate| *candidate == index))
+            .unwrap_or(0) as i32;
+        let position = (current + delta).clamp(0, order.len() as i32 - 1) as usize;
+        self.note_habit = Some(order[position]);
+        self.note_cursor = 0;
     }
 
     /// Jump from a note to its habit and day in the Habits (or Archive) tab.
@@ -786,7 +813,9 @@ impl App {
 
     pub fn selected(&self) -> Option<usize> {
         if self.tab == Tab::Notes {
-            return self.notes().get(self.note_cursor).map(|(index, _)| *index);
+            return self
+                .note_habit
+                .filter(|index| *index < self.data.habits.len());
         }
         self.visible_indices().get(self.cursor).copied()
     }
@@ -904,10 +933,19 @@ impl App {
             }
         }
 
-        // The Notes tab has its own cursor; `enter` jumps to the habit/day and
-        // `n` edits the selected note.
+        // The Notes tab shows one habit's journal at a time: `h`/`l` (or
+        // `[`/`]`) change the habit, `enter` jumps to the note's day and `n`
+        // edits it.
         if self.tab == Tab::Notes {
             match key.code {
+                KeyCode::Char('h') | KeyCode::Char('[') => {
+                    self.move_note_habit(-1);
+                    return Ok(());
+                }
+                KeyCode::Char('l') | KeyCode::Char(']') => {
+                    self.move_note_habit(1);
+                    return Ok(());
+                }
                 KeyCode::Char('j') | KeyCode::Down => {
                     self.move_note(1);
                     return Ok(());
@@ -931,6 +969,8 @@ impl App {
                 KeyCode::Char('n') => {
                     if let Some((index, date)) = self.notes().get(self.note_cursor).copied() {
                         self.start_note_on(index, date);
+                    } else if let Some(index) = self.note_habit {
+                        self.start_note_on(index, self.view_date);
                     }
                     return Ok(());
                 }
@@ -2044,7 +2084,7 @@ mod tests {
     }
 
     #[test]
-    fn the_notes_tab_lists_every_note_newest_first() {
+    fn the_notes_tab_lists_only_the_selected_habits_notes() {
         let mut app = app();
         let read = app
             .data
@@ -2052,13 +2092,20 @@ mod tests {
             .unwrap();
         app.data.habits[0].set_note(date("2026-11-09"), "gym note");
         app.data.habits[read].set_note(date("2026-11-10"), "read note");
-        assert_eq!(
-            app.notes(),
-            vec![(read, date("2026-11-10")), (0, date("2026-11-09"))]
-        );
 
-        app.filter = "read note".into();
+        // Reaching Notes through Tags keeps the habit picked in Habits.
+        app.select_tab(Tab::Tags);
+        app.select_tab(Tab::Notes);
+        assert_eq!(app.note_habit, Some(0));
+        assert_eq!(app.notes(), vec![(0, date("2026-11-09"))]);
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.note_habit, Some(read));
         assert_eq!(app.notes(), vec![(read, date("2026-11-10"))]);
+
+        app.filter = "gym note".into();
+        assert!(app.notes().is_empty());
     }
 
     #[test]

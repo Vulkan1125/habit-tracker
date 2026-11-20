@@ -124,8 +124,9 @@ wrapped in the detail pane, and included in search. It is now called the habit's
 **Phase 2 shipped in 0.3.0:** dated notes, one per habit per day, written with `n` in the TUI and
 listed newest first in the detail pane. The original `note` field stayed put, so the upgrade is
 additive. The detail pane later capped that list at the five most recent notes under a `recent
-notes` heading, with the full journal moved to a Notes tab between Tags and Archive; notes on cheat
-or missed days carry an `×` in the cheat or missed colour.
+notes` heading, with the full journal for the selected habit moved to a Notes tab between Tags and
+Archive (`h`/`l` switches habit); notes on cheat or missed days carry an `×` in the cheat or missed
+colour.
 
 The `note` field and its rendering already existed in 0.1.0; there was no way to write one from
 the app.

@@ -177,11 +177,11 @@ whether to merge the two, so a typo cannot silently create a near-duplicate tag.
 
 ![The Tags tab: each tag with its active-habit count, ready to open or rename](docs/screenshots/tags.png)
 
-The Notes tab holds the full dated-note journal across every habit. `enter` or a click opens the
-note's habit on that day; `n` edits the note under the cursor, and the filter searches note text as
-well as habit details.
+The Notes tab holds the full dated-note journal of one habit at a time. It opens on the habit
+selected in the Habits tab; `h` / `l` switches habit, `enter` or a click opens the note's day, `n`
+edits the note under the cursor, and the filter searches note text as well as habit details.
 
-![The Notes tab: every dated note, newest first, with habits and dates](docs/screenshots/notes.png)
+![The Notes tab: one habit's dated notes, newest first](docs/screenshots/notes.png)
 
 Press `n` to write or edit a note; right after checking a habit off is the natural moment. The
 dialog opens on the day you are looking at (today unless you moved with `[` / `]`), and `tab` moves
@@ -202,9 +202,9 @@ single token can offer alternatives: `#health|#fitness` matches habits with eith
   archived and finished ones under an **Archive** heading. On the tag list `e` renames the tag
   under the cursor, or merges it into another tag after asking. The Archive tab groups closed
   habits under **Archived** and **Ended**.
-- **Notes tab** with every dated note across all habits, newest first. `j`/`k` move, `enter` (or a
-  click) jumps to that habit and day, and `n` edits the selected note. The `/` filter narrows by
-  habit or by note text.
+- **Notes tab** with the selected habit's dated notes, newest first. It opens on the habit you were
+  looking at; `h`/`l` (or `[`/`]`) switches habit, `j`/`k` moves between notes, `enter` (or a click)
+  jumps to that day, and `n` edits the selected note. The `/` filter narrows by habit or note text.
 - **Habit rows** with the selected day's marker, a 7-day dot strip and weekly quota progress.
   Counted habits also show their `2/3` progress, and a partial day gets `◍` until the target is
   met. Habits with an end date replace the schedule label with a countdown (`51d left`, `last day`,

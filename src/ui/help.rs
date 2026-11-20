@@ -16,6 +16,7 @@ const KEYS: &[(&str, &str)] = &[
     ("[ ]", "previous / next day"),
     ("t", "back to today"),
     ("j k ↑ ↓", "move"),
+    ("h l", "switch habit in the Notes tab"),
     ("g G", "first / last"),
     ("tab", "switch habits / tags / notes / archive"),
     ("n", "note for a chosen day"),

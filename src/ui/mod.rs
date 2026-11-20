@@ -161,7 +161,7 @@ fn hint(app: &App, max_width: usize) -> String {
             "j k move · enter open · e rename · tab next · ? help · q quit".to_string()
         }
         Mode::Normal if app.tab == Tab::Notes => {
-            "j k move · enter open · n edit · tab next · ? help · q quit".to_string()
+            "h l habit · j k note · enter open · n edit · tab next · ? help".to_string()
         }
         Mode::Normal if app.tab == Tab::Archive => {
             "d restore · space add · n note · e edit · x delete · u undo · tab next · ? help"
@@ -792,18 +792,28 @@ mod tests {
     }
 
     #[test]
-    fn the_notes_tab_lists_notes_from_every_habit() {
+    fn the_notes_tab_lists_one_habit_at_a_time() {
         let mut app = app_with("Gym");
         let read = app.data.add_habit("Read", Schedule::Daily, date()).unwrap();
         app.data.habits[0].set_note(date(), "felt strong");
         app.data.habits[read].set_note(date() - chrono::Duration::days(1), "one chapter");
+
         app.select_tab(Tab::Notes);
         let screen = render(&mut app, 100, 30);
-        assert!(screen.contains("Notes 2"), "{screen}");
-        assert!(screen.contains("2026-11-10"), "{screen}");
-        assert!(screen.contains("Gym"), "{screen}");
+        assert!(screen.contains("Notes 1"), "{screen}");
+        assert!(screen.contains("Gym · 1 notes"), "{screen}");
         assert!(screen.contains("felt strong"), "{screen}");
+        assert!(!screen.contains("one chapter"), "{screen}");
+
+        app.handle_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('l'),
+            crossterm::event::KeyModifiers::NONE,
+        ))
+        .unwrap();
+        let screen = render(&mut app, 100, 30);
+        assert!(screen.contains("Read · 1 notes"), "{screen}");
         assert!(screen.contains("one chapter"), "{screen}");
+        assert!(!screen.contains("felt strong"), "{screen}");
     }
 
     #[test]

@@ -4,6 +4,14 @@ All notable changes to `habit` are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [semantic versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **The Notes tab is per habit again.** It opens on the habit selected in the Habits tab; `h`/`l`
+  (or `[`/`]`) switches habit. Notes from other habits no longer mix into the list, and the tab
+  count and header name the habit being shown.
+
 ## [0.13.0] (2026-11-20)
 
 ### Added
