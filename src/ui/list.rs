@@ -1,8 +1,8 @@
-//! The habit list pane, with Habits and Tags tabs.
+//! The left pane, with Habits, Tags, Notes and Archive tabs.
 //!
-//! Tabs, tag rows and the back link are clickable; [`App::hits`] records where
-//! they were drawn so the mouse handler can resolve a click without redoing
-//! the layout.
+//! Tabs, tag rows, note rows and the back link are clickable; [`App::hits`]
+//! records where they were drawn so the mouse handler can resolve a click
+//! without redoing the layout.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -10,8 +10,8 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, List, ListItem, Paragraph};
 
-use crate::app::{App, ListRow, Tab};
-use habit::format::{pad_right, width};
+use crate::app::{App, ListRow, NoteKind, Tab};
+use habit::format::{pad_right, truncate, width, wrap};
 use habit::model::Habit;
 use habit::stats::{self, Status};
 use habit::theme::Theme;
@@ -29,6 +29,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
     app.hits.tabs.clear();
     app.hits.list = None;
     app.hits.back = None;
+    app.hits.note_rows.clear();
     if inner.height == 0 {
         return;
     }
@@ -57,6 +58,10 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
             tag_list(frame, content, app);
         }
         (Tab::Tags, Some(tag)) => tag_habits(frame, content, app, &tag),
+        (Tab::Notes, _) => {
+            app.hits.list = Some(content);
+            note_list(frame, content, app);
+        }
         _ => {
             app.hits.list = Some(content);
             habit_list(frame, content, app);
@@ -80,6 +85,7 @@ fn draw_tabs(frame: &mut Frame, area: Rect, app: &mut App) {
         })
         .count();
     let tags_count = app.tags().len();
+    let notes_count: usize = app.data.habits.iter().map(|habit| habit.notes.len()).sum();
     let archive_count = app
         .data
         .habits
@@ -92,6 +98,7 @@ fn draw_tabs(frame: &mut Frame, area: Rect, app: &mut App) {
     for (tab, label) in [
         (Tab::Habits, format!(" Habits {habits_count} ")),
         (Tab::Tags, format!(" Tags {tags_count} ")),
+        (Tab::Notes, format!(" Notes {notes_count} ")),
         (Tab::Archive, format!(" Archive {archive_count} ")),
     ] {
         let label_width = width(&label) as u16;
@@ -111,8 +118,7 @@ fn draw_tabs(frame: &mut Frame, area: Rect, app: &mut App) {
             label,
             if app.tab == tab { active } else { inactive },
         ));
-        spans.push(Span::raw(" "));
-        x = x.saturating_add(label_width + 1);
+        x = x.saturating_add(label_width);
     }
 
     let filter = if app.filtering {
@@ -242,6 +248,109 @@ fn tag_habits(frame: &mut Frame, area: Rect, app: &mut App, tag: &str) {
     habit_list(frame, content, app);
 }
 
+fn note_list(frame: &mut Frame, area: Rect, app: &mut App) {
+    let theme = app.theme;
+    let notes = app.notes();
+    let row_width = area.width.saturating_sub(2) as usize;
+    let mut items: Vec<ListItem> = Vec::with_capacity(notes.len().max(1));
+    let mut heights: Vec<(usize, u16)> = Vec::with_capacity(notes.len());
+
+    if notes.is_empty() {
+        let message = if app.data.habits.iter().all(|habit| habit.notes.is_empty()) {
+            "No notes yet: press n on a habit to add one"
+        } else if app.filter.is_empty() {
+            "Nothing to show"
+        } else {
+            "Nothing matches that filter"
+        };
+        items.push(ListItem::new(Line::from(Span::styled(
+            format!(" {message}"),
+            Style::default().fg(theme.dim),
+        ))));
+    } else {
+        for (index, date) in &notes {
+            let habit = &app.data.habits[*index];
+            let (marker, note_style) = match app.note_kind(habit, *date) {
+                NoteKind::Cheat => ("× ", Style::default().fg(theme.cheat)),
+                NoteKind::Missed => ("× ", Style::default().fg(theme.missed)),
+                NoteKind::Normal => ("", Style::default().fg(theme.fg)),
+            };
+            let name_width = row_width.saturating_sub(12).max(4);
+            let mut lines = vec![Line::from(vec![
+                Span::styled(
+                    format!("{:<10}", date.format("%Y-%m-%d")),
+                    Style::default().fg(theme.dim),
+                ),
+                Span::raw("  "),
+                Span::styled(
+                    truncate(&habit.name, name_width),
+                    Style::default()
+                        .fg(theme.habit_accent(&habit.id))
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ])];
+            let indent = 2usize;
+            let text_width = row_width.saturating_sub(indent).max(8);
+            for (chunk_index, chunk) in wrap(habit.note_on(*date).unwrap_or(""), text_width, 2)
+                .into_iter()
+                .enumerate()
+            {
+                let prefix = if chunk_index == 0 {
+                    Span::styled(marker, note_style)
+                } else {
+                    Span::raw(" ".repeat(width(marker)))
+                };
+                lines.push(Line::from(vec![
+                    Span::raw(" ".repeat(indent)),
+                    prefix,
+                    Span::styled(chunk, note_style),
+                ]));
+            }
+            heights.push((items.len(), lines.len() as u16));
+            items.push(ListItem::new(lines));
+        }
+    }
+
+    let selected = if notes.is_empty() {
+        None
+    } else {
+        Some(app.note_cursor.min(notes.len() - 1))
+    };
+
+    let list = List::new(items)
+        .style(theme.base())
+        .highlight_style(highlight(theme))
+        .highlight_symbol("▸ ");
+
+    app.list_state.select(selected);
+    frame.render_stateful_widget(list, area, &mut app.list_state);
+
+    // A note can span several visual lines, so record where each one landed
+    // after the list has scrolled itself.
+    let offset = app.list_state.offset();
+    let bottom = area.y.saturating_add(area.height);
+    let mut y = area.y;
+    for (index, height) in heights {
+        if index < offset {
+            continue;
+        }
+        if y >= bottom {
+            break;
+        }
+        let visible = height.min(bottom - y);
+        app.hits.note_rows.push((
+            index,
+            Rect {
+                x: area.x,
+                y,
+                width: area.width,
+                height: visible,
+            },
+        ));
+        y = y.saturating_add(height);
+    }
+}
+
 fn tag_list(frame: &mut Frame, area: Rect, app: &mut App) {
     let theme = app.theme;
     let tags = app.tags();
@@ -323,7 +432,7 @@ fn row_line(habit: &Habit, app: &App, inner_width: usize, show_counts: bool) -> 
     } else if count >= target {
         ("●", Style::default().fg(theme.done))
     } else if count > 0 {
-        ("◐", Style::default().fg(theme.warn))
+        ("◍", Style::default().fg(theme.warn))
     } else if excused {
         ("◆", Style::default().fg(theme.cheat))
     } else if due {
@@ -403,7 +512,7 @@ fn row_line(habit: &Habit, app: &App, inner_width: usize, show_counts: bool) -> 
     for (_, status) in stats::recent(habit, &app.data.history(), date, DOTS) {
         let (glyph, style) = match status {
             Status::Done => ("●", Style::default().fg(theme.done)),
-            Status::Partial => ("◐", Style::default().fg(theme.warn)),
+            Status::Partial => ("◍", Style::default().fg(theme.warn)),
             Status::Cheat => ("◆", Style::default().fg(theme.cheat)),
             Status::Missed => ("○", Style::default().fg(theme.missed)),
             Status::Pending => ("◌", Style::default().fg(theme.warn)),

@@ -23,7 +23,18 @@ use habit::theme::{ColorMode, Theme, ThemeName};
 pub enum Tab {
     Habits,
     Tags,
+    Notes,
     Archive,
+}
+
+/// Why a dated note stands out in the list and detail pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoteKind {
+    Normal,
+    /// The day was marked as a cheat, even when it was not the excused one.
+    Cheat,
+    /// The day was due and went unrecorded.
+    Missed,
 }
 
 pub enum Mode {
@@ -226,6 +237,8 @@ pub struct HitAreas {
     pub tabs: Vec<(Tab, Rect)>,
     pub list: Option<Rect>,
     pub back: Option<Rect>,
+    /// One rectangle per note row in the Notes tab, for click handling.
+    pub note_rows: Vec<(usize, Rect)>,
 }
 
 pub struct Confirm {
@@ -259,6 +272,7 @@ pub struct App {
     pub tab: Tab,
     pub tag_focus: Option<String>,
     pub tag_cursor: usize,
+    pub note_cursor: usize,
     pub hits: HitAreas,
     /// Whether the one-line hint bar at the bottom is drawn.
     pub show_footer: bool,
@@ -289,6 +303,7 @@ impl App {
             tab: Tab::Habits,
             tag_focus: None,
             tag_cursor: 0,
+            note_cursor: 0,
             hits: HitAreas::default(),
             show_footer: true,
             config: config.clone(),
@@ -333,6 +348,45 @@ impl App {
         counts.into_iter().collect()
     }
 
+    /// Every dated note, newest first, as `(habit index, date)` pairs.
+    ///
+    /// The Notes tab lists them across habits; the current filter narrows by
+    /// habit text or by the note text itself.
+    pub fn notes(&self) -> Vec<(usize, NaiveDate)> {
+        let query = self.filter.trim().to_lowercase();
+        let mut rows = Vec::new();
+        for (index, habit) in self.data.habits.iter().enumerate() {
+            if !query.is_empty()
+                && !matches_query(habit, &query)
+                && !habit
+                    .notes
+                    .values()
+                    .any(|text| text.to_lowercase().contains(&query))
+            {
+                continue;
+            }
+            rows.extend(habit.notes.keys().map(|date| (index, *date)));
+        }
+        rows.sort_by(|a, b| {
+            b.1.cmp(&a.1)
+                .then_with(|| self.data.habits[a.0].name.cmp(&self.data.habits[b.0].name))
+        });
+        rows
+    }
+
+    /// Whether the note's day was a cheat or a missed day.
+    pub fn note_kind(&self, habit: &Habit, date: NaiveDate) -> NoteKind {
+        if self.data.cheats.is_cheat(date, &habit.id) {
+            NoteKind::Cheat
+        } else if stats::status_on(habit, &self.data.history(), date, self.today)
+            == stats::Status::Missed
+        {
+            NoteKind::Missed
+        } else {
+            NoteKind::Normal
+        }
+    }
+
     /// Visual rows for the left pane. Tags and the archive have their own
     /// grouping; the habits tab pushes habits that have not started yet under a
     /// separate heading so today's list stays about today.
@@ -366,6 +420,7 @@ impl App {
                 }
                 rows
             }
+            Tab::Notes => Vec::new(),
             Tab::Archive => {
                 let mut archived = Vec::new();
                 let mut ended = Vec::new();
@@ -443,13 +498,15 @@ impl App {
         self.tag_focus = None;
         self.cursor = 0;
         self.tag_cursor = 0;
+        self.note_cursor = 0;
         self.clamp_cursor();
     }
 
     fn next_tab(&mut self) {
         let next = match self.tab {
             Tab::Habits => Tab::Tags,
-            Tab::Tags => Tab::Archive,
+            Tab::Tags => Tab::Notes,
+            Tab::Notes => Tab::Archive,
             Tab::Archive => Tab::Habits,
         };
         self.select_tab(next);
@@ -463,6 +520,40 @@ impl App {
         }
         let current = self.tag_cursor.min(length - 1) as i32;
         self.tag_cursor = (current + delta).clamp(0, length as i32 - 1) as usize;
+    }
+
+    fn move_note(&mut self, delta: i32) {
+        let length = self.notes().len();
+        if length == 0 {
+            self.note_cursor = 0;
+            return;
+        }
+        let current = self.note_cursor.min(length - 1) as i32;
+        self.note_cursor = (current + delta).clamp(0, length as i32 - 1) as usize;
+    }
+
+    /// Jump from a note to its habit and day in the Habits (or Archive) tab.
+    fn open_focused_note(&mut self) {
+        let notes = self.notes();
+        let Some((index, date)) = notes.get(self.note_cursor).copied() else {
+            return;
+        };
+        let habit = &self.data.habits[index];
+        self.tab = if habit.archived || habit.is_finished(self.today) {
+            Tab::Archive
+        } else {
+            Tab::Habits
+        };
+        self.tag_focus = None;
+        self.view_date = date.min(self.today);
+        self.note_cursor = 0;
+        if let Some(position) = self
+            .visible_indices()
+            .iter()
+            .position(|candidate| *candidate == index)
+        {
+            self.cursor = position;
+        }
     }
 
     pub fn open_focused_tag(&mut self) {
@@ -552,17 +643,24 @@ impl App {
     }
 
     fn start_note(&mut self) {
-        let Some(habit) = self.selected_habit() else {
+        let Some(index) = self.selected() else {
             self.flash_err("select a habit first");
             return;
         };
         // Defaults to the day on screen, which is today unless the user moved
         // with `[` / `]`, and never earlier than the habit itself.
-        let default = self.view_date.max(habit.created);
+        let default = self.view_date.max(self.data.habits[index].created);
+        self.start_note_on(index, default);
+    }
+
+    /// Open the note dialog for a habit and day, from either tab.
+    fn start_note_on(&mut self, index: usize, date: NaiveDate) {
+        let habit = &self.data.habits[index];
+        let date = date.max(habit.created);
         let mut date_input = crate::ui::form::TextInput::with_limit(10);
-        date_input.set(&default.format("%Y-%m-%d").to_string());
+        date_input.set(&date.format("%Y-%m-%d").to_string());
         let mut input = crate::ui::form::TextInput::with_limit(400);
-        if let Some(existing) = habit.note_on(default) {
+        if let Some(existing) = habit.note_on(date) {
             input.set(existing);
         }
         self.mode = Mode::Note(NoteEntry {
@@ -651,6 +749,19 @@ impl App {
             return;
         }
 
+        if self.tab == Tab::Notes {
+            if let Some((index, _)) = self
+                .hits
+                .note_rows
+                .iter()
+                .find(|(_, rect)| rect_contains(*rect, column, row))
+            {
+                self.note_cursor = *index;
+                self.open_focused_note();
+            }
+            return;
+        }
+
         let Some(ListRow::Habit(index)) = self.view_rows().get(offset).copied() else {
             return;
         };
@@ -666,12 +777,17 @@ impl App {
     fn scroll_list(&mut self, delta: i32) {
         if self.tab == Tab::Tags && self.tag_focus.is_none() {
             self.move_tag(delta);
+        } else if self.tab == Tab::Notes {
+            self.move_note(delta);
         } else {
             self.move_cursor(delta);
         }
     }
 
     pub fn selected(&self) -> Option<usize> {
+        if self.tab == Tab::Notes {
+            return self.notes().get(self.note_cursor).map(|(index, _)| *index);
+        }
         self.visible_indices().get(self.cursor).copied()
     }
 
@@ -770,6 +886,54 @@ impl App {
                 }
                 // Global keys still work, but habit actions must not fire on a
                 // row that is not on screen.
+                KeyCode::Tab
+                | KeyCode::Char('T')
+                | KeyCode::Char('m')
+                | KeyCode::Char('b')
+                | KeyCode::Char('r')
+                | KeyCode::Char('u')
+                | KeyCode::Char('/')
+                | KeyCode::Char('?')
+                | KeyCode::Char('q') => {}
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {}
+                KeyCode::Esc => {
+                    self.select_tab(Tab::Habits);
+                    return Ok(());
+                }
+                _ => return Ok(()),
+            }
+        }
+
+        // The Notes tab has its own cursor; `enter` jumps to the habit/day and
+        // `n` edits the selected note.
+        if self.tab == Tab::Notes {
+            match key.code {
+                KeyCode::Char('j') | KeyCode::Down => {
+                    self.move_note(1);
+                    return Ok(());
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    self.move_note(-1);
+                    return Ok(());
+                }
+                KeyCode::Char('g') | KeyCode::Home => {
+                    self.note_cursor = 0;
+                    return Ok(());
+                }
+                KeyCode::Char('G') | KeyCode::End => {
+                    self.note_cursor = self.notes().len().saturating_sub(1);
+                    return Ok(());
+                }
+                KeyCode::Enter | KeyCode::Char(' ') => {
+                    self.open_focused_note();
+                    return Ok(());
+                }
+                KeyCode::Char('n') => {
+                    if let Some((index, date)) = self.notes().get(self.note_cursor).copied() {
+                        self.start_note_on(index, date);
+                    }
+                    return Ok(());
+                }
                 KeyCode::Tab
                 | KeyCode::Char('T')
                 | KeyCode::Char('m')
@@ -1017,7 +1181,7 @@ impl App {
             ));
         } else {
             self.flash_ok(format!(
-                "◐ {}{} {now}/{target} today · {target} needed",
+                "◍ {}{} {now}/{target} today · {target} needed",
                 self.day_prefix(date),
                 habit.name
             ));
@@ -1062,7 +1226,7 @@ impl App {
 
         if target > 1 {
             self.flash_ok(format!(
-                "◐ {}{} {now}/{target} today",
+                "◍ {}{} {now}/{target} today",
                 self.day_prefix(date),
                 habit.name
             ));
@@ -1868,12 +2032,96 @@ mod tests {
         assert_eq!(app.tag_focus.as_deref(), Some("health"));
         app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
             .unwrap();
-        assert_eq!(app.tab, Tab::Archive);
+        assert_eq!(app.tab, Tab::Notes);
         assert!(app.tag_focus.is_none());
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.tab, Tab::Archive);
         app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
             .unwrap();
         assert_eq!(app.tab, Tab::Habits);
         assert!(app.tag_focus.is_none());
+    }
+
+    #[test]
+    fn the_notes_tab_lists_every_note_newest_first() {
+        let mut app = app();
+        let read = app
+            .data
+            .add_habit("Read", Schedule::Daily, date("2026-11-01"))
+            .unwrap();
+        app.data.habits[0].set_note(date("2026-11-09"), "gym note");
+        app.data.habits[read].set_note(date("2026-11-10"), "read note");
+        assert_eq!(
+            app.notes(),
+            vec![(read, date("2026-11-10")), (0, date("2026-11-09"))]
+        );
+
+        app.filter = "read note".into();
+        assert_eq!(app.notes(), vec![(read, date("2026-11-10"))]);
+    }
+
+    #[test]
+    fn notes_tab_enter_opens_the_habit_and_day() {
+        let mut app = app();
+        app.data.habits[0].set_note(date("2026-11-03"), "old day");
+        app.select_tab(Tab::Notes);
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.tab, Tab::Habits);
+        assert_eq!(app.view_date, date("2026-11-03"));
+        assert_eq!(app.selected(), Some(0));
+    }
+
+    #[test]
+    fn clicking_a_note_row_opens_its_habit_and_day() {
+        let mut app = app();
+        app.data.habits[0].set_note(date("2026-11-03"), "old day");
+        app.select_tab(Tab::Notes);
+        app.hits.list = Some(Rect::new(0, 4, 40, 10));
+        app.hits.note_rows = vec![(0, Rect::new(0, 4, 40, 3))];
+        app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 2,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert_eq!(app.tab, Tab::Habits);
+        assert_eq!(app.view_date, date("2026-11-03"));
+    }
+
+    #[test]
+    fn notes_tab_n_edits_the_selected_note() {
+        let mut app = app();
+        app.data.habits[0].set_note(date("2026-11-03"), "old day");
+        app.select_tab(Tab::Notes);
+        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE))
+            .unwrap();
+        let Mode::Note(entry) = &app.mode else {
+            panic!("the note dialog should open");
+        };
+        assert_eq!(entry.date_input.text(), "2026-11-03");
+        assert_eq!(entry.input.text(), "old day");
+    }
+
+    #[test]
+    fn notes_on_cheat_and_missed_days_are_classified() {
+        let mut app = app();
+        app.data.habits[0].set_note(date("2026-11-05"), "slipped");
+        app.data.habits[0].set_note(date("2026-11-06"), "planned rest");
+        app.data.cheats.set(date("2026-11-06"), "gym", true);
+        assert_eq!(
+            app.note_kind(&app.data.habits[0], date("2026-11-05")),
+            NoteKind::Missed
+        );
+        assert_eq!(
+            app.note_kind(&app.data.habits[0], date("2026-11-06")),
+            NoteKind::Cheat
+        );
+        assert_eq!(
+            app.note_kind(&app.data.habits[0], date("2026-11-10")),
+            NoteKind::Normal
+        );
     }
 
     #[test]

@@ -6,8 +6,8 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 
-use crate::app::App;
-use habit::format::{pad_right, truncate};
+use crate::app::{App, NoteKind};
+use habit::format::{pad_right, truncate, width, wrap};
 use habit::model::Habit;
 use habit::stats::{self, Status};
 use habit::theme::Theme;
@@ -203,21 +203,29 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     }
     lines.push(Line::from(summary));
 
-    let notes: Vec<(chrono::NaiveDate, &str)> = habit.notes_desc().collect();
+    const RECENT_NOTES: usize = 5;
+    let total_notes = habit.notes.len();
+    let notes: Vec<(chrono::NaiveDate, &str)> = habit.notes_desc().take(RECENT_NOTES).collect();
     if !notes.is_empty() {
         lines.push(Line::raw(""));
         lines.push(Line::from(Span::styled(
-            "notes",
+            "recent notes",
             Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
         )));
         let max_lines = area.height.saturating_sub(2) as usize;
         let date_column = 11usize;
-        let note_width = inner_width.saturating_sub(date_column).max(8);
         let mut shown = 0;
         for (date, text) in &notes {
             if lines.len() >= max_lines {
                 break;
             }
+            let (marker, note_style) = match app.note_kind(habit, *date) {
+                NoteKind::Cheat => ("× ", Style::default().fg(theme.cheat)),
+                NoteKind::Missed => ("× ", Style::default().fg(theme.missed)),
+                NoteKind::Normal => ("", Style::default().fg(theme.fg)),
+            };
+            let text_column = date_column + width(marker);
+            let note_width = inner_width.saturating_sub(text_column).max(8);
             let chunks = wrap(text, note_width, 2);
             let room = max_lines.saturating_sub(lines.len());
             let take = chunks.len().min(room);
@@ -228,12 +236,13 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
                             format!("{:<10} ", date.format("%Y-%m-%d")),
                             Style::default().fg(theme.dim),
                         ),
-                        Span::styled(chunk.clone(), Style::default().fg(theme.fg)),
+                        Span::styled(marker, note_style),
+                        Span::styled(chunk.clone(), note_style),
                     ]));
                 } else {
                     lines.push(Line::from(vec![
-                        Span::raw(" ".repeat(date_column)),
-                        Span::styled(chunk.clone(), Style::default().fg(theme.fg)),
+                        Span::raw(" ".repeat(text_column)),
+                        Span::styled(chunk.clone(), note_style),
                     ]));
                 }
             }
@@ -244,10 +253,10 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
                 break;
             }
         }
-        let remaining = notes.len().saturating_sub(shown);
+        let remaining = total_notes.saturating_sub(shown);
         if remaining > 0 && lines.len() < max_lines {
             lines.push(Line::from(Span::styled(
-                format!("… {remaining} older"),
+                format!("… {remaining} more in the Notes tab"),
                 Style::default().fg(theme.dim),
             )));
         }
@@ -353,41 +362,6 @@ fn heatmap_lines(
     lines
 }
 
-/// Greedy word wrap, capped at `max_lines` with an ellipsis on the last one.
-fn wrap(text: &str, width: usize, max_lines: usize) -> Vec<String> {
-    if width == 0 {
-        return Vec::new();
-    }
-    let mut lines = Vec::new();
-    let mut current = String::new();
-    for word in text.split_whitespace() {
-        if current.is_empty() {
-            current.push_str(word);
-            continue;
-        }
-        if current.chars().count() + 1 + word.chars().count() <= width {
-            current.push(' ');
-            current.push_str(word);
-        } else {
-            lines.push(std::mem::take(&mut current));
-            current.push_str(word);
-            if lines.len() == max_lines {
-                break;
-            }
-        }
-    }
-    if lines.len() < max_lines && !current.is_empty() {
-        lines.push(current);
-    }
-    if let Some(last) = lines.last_mut()
-        && last.chars().count() > width
-    {
-        *last = truncate(last, width);
-    }
-    lines.truncate(max_lines);
-    lines
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -396,7 +370,7 @@ mod tests {
     fn wrapping_respects_width_and_line_limit() {
         let lines = wrap("one two three four five six", 9, 2);
         assert!(lines.len() <= 2);
-        assert!(lines.iter().all(|line| line.chars().count() <= 9));
+        assert!(lines.iter().all(|line| width(line) <= 9));
         assert_eq!(lines[0], "one two");
     }
 

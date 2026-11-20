@@ -123,7 +123,9 @@ wrapped in the detail pane, and included in search. It is now called the habit's
 
 **Phase 2 shipped in 0.3.0:** dated notes, one per habit per day, written with `n` in the TUI and
 listed newest first in the detail pane. The original `note` field stayed put, so the upgrade is
-additive.
+additive. The detail pane later capped that list at the five most recent notes under a `recent
+notes` heading, with the full journal moved to a Notes tab between Tags and Archive; notes on cheat
+or missed days carry an `×` in the cheat or missed colour.
 
 The `note` field and its rendering already existed in 0.1.0; there was no way to write one from
 the app.
@@ -142,8 +144,8 @@ journal without turning the app into a journal app.
 
 **Open questions**
 
-- Length limit? Prefer no hard limit, but wrap at the pane width and cap the pane height with a
-  scroll indicator.
+- Length limit? The dialog caps input at 400 characters, wraps at its width and follows the caret
+  when the text outgrows the popup; the detail pane caps each note at two wrapped lines.
 - Do notes belong in the JSON file or a sidecar? Same file; one file is the selling point.
 
 ---

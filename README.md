@@ -118,7 +118,7 @@ habit list                      # TODAY reads 2/3 for that habit
 ```
 
 In the TUI, `space` adds one entry and `-` takes one back. A counted row shows its progress next to
-the name (`2/3`) and its marker is `◐` until the target is met, then `●`. Partial days appear in the
+the name (`2/3`) and its marker is `◍` until the target is met, then `●`. Partial days appear in the
 dot strip and heatmap as partial, not as full completions: streaks and completion rates still need
 the whole target, while the detail pane always shows the honest `2/3`. The add/edit dialog's
 **Per day** field sets the target; leave it empty or at `1` for a plain check-off.
@@ -166,7 +166,7 @@ habit describe gym --clear
 `habit note` remains an alias for `habit describe`, and `habit add --note` still sets the
 description for compatibility.
 
-In the TUI, `tab` cycles the left pane through **Habits**, **Tags** and **Archive**. The Habits
+In the TUI, `tab` cycles the left pane through **Habits**, **Tags**, **Notes** and **Archive**. The Habits
 tab shows what is running today, with habits whose start date is still ahead under a **Starting
 later** heading. The tag list shows each tag with its count of still-active habits; open a tag with
 `enter`, `space` or a click to see its active habits and, under an **Archive** heading, the archived
@@ -176,6 +176,12 @@ name is rewritten on every habit that carries it, and typing a name that is alre
 whether to merge the two, so a typo cannot silently create a near-duplicate tag.
 
 ![The Tags tab: each tag with its active-habit count, ready to open or rename](docs/screenshots/tags.png)
+
+The Notes tab holds the full dated-note journal across every habit. `enter` or a click opens the
+note's habit on that day; `n` edits the note under the cursor, and the filter searches note text as
+well as habit details.
+
+![The Notes tab: every dated note, newest first, with habits and dates](docs/screenshots/notes.png)
 
 Press `n` to write or edit a note; right after checking a habit off is the natural moment. The
 dialog opens on the day you are looking at (today unless you moved with `[` / `]`), and `tab` moves
@@ -190,24 +196,30 @@ single token can offer alternatives: `#health|#fitness` matches habits with eith
 
 ### The TUI
 
-- **Habits, Tags and Archive tabs** in the left pane, cycled with `tab` and clickable with the
+- **Habits, Tags, Notes and Archive tabs** in that order, cycled with `tab` and clickable with the
   mouse. Habits that start in the future sit under a **Starting later** heading, so today's list
   stays about today. Each tag shows its active-habit count; opening one splits active habits from
   archived and finished ones under an **Archive** heading. On the tag list `e` renames the tag
   under the cursor, or merges it into another tag after asking. The Archive tab groups closed
   habits under **Archived** and **Ended**.
+- **Notes tab** with every dated note across all habits, newest first. `j`/`k` move, `enter` (or a
+  click) jumps to that habit and day, and `n` edits the selected note. The `/` filter narrows by
+  habit or by note text.
 - **Habit rows** with the selected day's marker, a 7-day dot strip and weekly quota progress.
-  Counted habits also show their `2/3` progress, and a partial day gets `◐` until the target is
+  Counted habits also show their `2/3` progress, and a partial day gets `◍` until the target is
   met. Habits with an end date replace the schedule label with a countdown (`51d left`, `last day`,
   `ended`), turning amber in the final three days.
 - **Date navigation** (`[` `]`, `t` for today): check off, excuse, inspect or annotate any past day.
 - **Detail pane** with `description:` directly under the habit title, and the description text,
   schedule line and tags all indented beneath it, then current and best streak, this week's bar,
   30-day completion, a weekly bar chart for quota habits (the last four weeks, each with its
-  `done/target`), an adaptive heatmap (up to 52 weeks) and dated notes (date left, note right).
+  `done/target`), an adaptive heatmap (up to 52 weeks) and its five **recent notes** (date left,
+  note right). Notes written on a cheat or missed day get an `×` and the palette's cheat or missed
+  colour; the detail pane points to the Notes tab for the rest.
 - **Dated notes**, newest first: press `n` after checking a habit off to journal the day, or `tab`
   inside the dialog to file it under another date (never the future, never before the habit's
-  start); empty input removes the note and edits are covered by undo.
+  start); long notes wrap inside the dialog, and the view follows the caret so the end stays
+  visible. Empty input removes the note and edits are covered by undo.
 - **Hideable bottom bar**: `b` reclaims the hint line and gives the panes one more row.
 - **Add/edit dialog** with schedule picker, weekday toggles, a per-day target, start/end dates, a
   reminder time, tags and description, all validated inline. A time in **Remind** is what opts a
@@ -274,7 +286,7 @@ $ habit add "Drink water" --per-day 3
 added Drink water [drink-water] · every day · since 2026-11-10
 
 $ habit done water --count 2
-◐ Drink water 2/3 on 2026-11-10 · streak 0 days
+◍ Drink water 2/3 on 2026-11-10 · streak 0 days
 
 $ habit done water
 ✓ Drink water 3/3 on 2026-11-10 · streak 1 day
@@ -546,7 +558,7 @@ Nothing else to configure. The data file is created on the first change.
 | Glyph | Meaning |
 | --- | --- |
 | `●` | done on the selected day (list, dot strip, heatmap) |
-| `◐` | some entries recorded, but fewer than the per-day target |
+| `◍` | some entries recorded, but fewer than the per-day target |
 | `○` | due but open in the row marker; a missed day in the dot strip; the colour tells them apart |
 | `◆` | cheat day (the excused first one in the month) |
 | `░` | a missed day in the heatmap |
@@ -563,7 +575,7 @@ Nothing else to configure. The data file is created on the first change.
 | --- | --- |
 | `space` | check off a plain habit, or add one entry to a counted habit (`n` then adds a note) |
 | `-` | take one entry back from the selected day |
-| `tab` | cycle the left pane through Habits, Tags and Archive |
+| `tab` | cycle the left pane through Habits, Tags, Notes and Archive |
 | `n` | write or edit a note; the dialog's date field can move it to any past day |
 | `b` | show or hide the bottom bar |
 | `c` | toggle a cheat day on the selected day |

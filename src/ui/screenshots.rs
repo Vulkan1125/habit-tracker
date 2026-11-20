@@ -405,6 +405,15 @@ fn write_readme_screenshots() {
         &screen_html(&frame, "habit · tags", bg, fg),
     );
 
+    let mut notes = demo_app(today, ThemeName::Catppuccin, ColorMode::Dark);
+    notes.select_tab(Tab::Notes);
+    let frame = buffer(&mut notes, 108, 32);
+    write(
+        dir,
+        "notes.html",
+        &screen_html(&frame, "habit · notes", bg, fg),
+    );
+
     let mut archive = demo_app(today, ThemeName::Catppuccin, ColorMode::Dark);
     archive.select_tab(Tab::Archive);
     archive.cursor = 1;

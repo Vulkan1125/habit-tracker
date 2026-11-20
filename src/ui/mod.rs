@@ -15,7 +15,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
 
 use crate::app::{App, Mode, Tab};
-use habit::format::{pad_right, truncate, width};
+use habit::format::{pad_right, truncate, width, wrap};
 use habit::theme::Theme;
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
@@ -159,6 +159,9 @@ fn hint(app: &App, max_width: usize) -> String {
         }
         Mode::Normal if app.tab == Tab::Tags && app.tag_focus.is_none() => {
             "j k move · enter open · e rename · tab next · ? help · q quit".to_string()
+        }
+        Mode::Normal if app.tab == Tab::Notes => {
+            "j k move · enter open · n edit · tab next · ? help · q quit".to_string()
         }
         Mode::Normal if app.tab == Tab::Archive => {
             "d restore · space add · n note · e edit · x delete · u undo · tab next · ? help"
@@ -338,7 +341,13 @@ fn note_overlay(frame: &mut Frame, area: Rect, theme: &Theme, entry: &crate::app
     use crate::app::NoteField;
 
     let width = area.width.saturating_sub(4).clamp(34, 68);
-    let height = 7.min(area.height);
+    let inner_width = width.saturating_sub(2) as usize;
+    let note_width = inner_width.saturating_sub(2).max(8);
+    let date_focused = entry.focus == NoteField::Date;
+    let note_text = field_text(&entry.input, !date_focused);
+    let wrapped = wrap(&note_text, note_width, usize::MAX);
+    // Grow with the note until a comfortable cap; anything longer scrolls.
+    let height = ((wrapped.len() + 5) as u16).clamp(9, 16).min(area.height);
     let popup = Rect {
         x: area.x + area.width.saturating_sub(width) / 2,
         y: area.y + area.height.saturating_sub(height) / 2,
@@ -359,7 +368,6 @@ fn note_overlay(frame: &mut Frame, area: Rect, theme: &Theme, entry: &crate::app
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
 
-    let date_focused = entry.focus == NoteField::Date;
     let room = inner.width as usize;
     let date_line = Line::from(vec![
         Span::styled("date  ", Style::default().fg(theme.dim)),
@@ -371,16 +379,27 @@ fn note_overlay(frame: &mut Frame, area: Rect, theme: &Theme, entry: &crate::app
             Style::default().fg(if date_focused { theme.fg } else { theme.dim }),
         ),
     ]);
-    let note_line = Line::from(vec![
-        Span::styled("note  ", Style::default().fg(theme.dim)),
-        Span::styled(
-            truncate(
-                &field_text(&entry.input, !date_focused),
-                room.saturating_sub(6),
-            ),
-            Style::default().fg(if date_focused { theme.dim } else { theme.fg }),
-        ),
-    ]);
+    let note_label = Line::from(Span::styled(
+        "note",
+        Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
+    ));
+    let note_rows = inner.height.saturating_sub(3) as usize;
+    let caret_line = wrapped
+        .iter()
+        .position(|line| line.contains('▏'))
+        .unwrap_or(wrapped.len().saturating_sub(1));
+    let offset = caret_line.saturating_sub(note_rows.saturating_sub(1));
+    let note_style = Style::default().fg(if date_focused { theme.dim } else { theme.fg });
+    let mut lines = vec![date_line, note_label];
+    for line in wrapped.iter().skip(offset).take(note_rows) {
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled(line.clone(), note_style),
+        ]));
+    }
+    while lines.len() < inner.height.saturating_sub(1) as usize {
+        lines.push(Line::raw(""));
+    }
     let tail = match &entry.error {
         Some(message) => Line::from(Span::styled(
             truncate(message, room),
@@ -391,17 +410,8 @@ fn note_overlay(frame: &mut Frame, area: Rect, theme: &Theme, entry: &crate::app
             Style::default().fg(theme.dim),
         )),
     };
-    frame.render_widget(
-        Paragraph::new(vec![
-            date_line,
-            Line::raw(""),
-            note_line,
-            Line::raw(""),
-            tail,
-        ])
-        .style(theme.base()),
-        inner,
-    );
+    lines.push(tail);
+    frame.render_widget(Paragraph::new(lines).style(theme.base()), inner);
 }
 
 /// The field's text with a visible caret when it has the keyboard.
@@ -758,6 +768,99 @@ mod tests {
         let older = screen.find("older entry").expect("older note");
         let oldest = screen.find("oldest entry").expect("oldest note");
         assert!(newest < older && older < oldest, "{screen}");
+    }
+
+    #[test]
+    fn the_detail_pane_shows_only_recent_notes() {
+        let mut app = app_with("Gym");
+        for back in 0..6 {
+            app.data.habits[0].set_note(
+                date() - chrono::Duration::days(back),
+                &format!("entry {back}"),
+            );
+        }
+        let screen = render(&mut app, 90, 44);
+        assert!(screen.contains("recent notes"), "{screen}");
+        for back in 0..5 {
+            assert!(
+                screen.contains(&format!("entry {back}")),
+                "entry {back} missing: {screen}"
+            );
+        }
+        assert!(!screen.contains("entry 5"), "{screen}");
+        assert!(screen.contains("1 more in the Notes tab"), "{screen}");
+    }
+
+    #[test]
+    fn the_notes_tab_lists_notes_from_every_habit() {
+        let mut app = app_with("Gym");
+        let read = app.data.add_habit("Read", Schedule::Daily, date()).unwrap();
+        app.data.habits[0].set_note(date(), "felt strong");
+        app.data.habits[read].set_note(date() - chrono::Duration::days(1), "one chapter");
+        app.select_tab(Tab::Notes);
+        let screen = render(&mut app, 100, 30);
+        assert!(screen.contains("Notes 2"), "{screen}");
+        assert!(screen.contains("2026-11-10"), "{screen}");
+        assert!(screen.contains("Gym"), "{screen}");
+        assert!(screen.contains("felt strong"), "{screen}");
+        assert!(screen.contains("one chapter"), "{screen}");
+    }
+
+    #[test]
+    fn notes_on_cheat_and_missed_days_get_a_cross_in_their_own_colour() {
+        let mut app = app_with("Gym");
+        app.data.habits[0].created = date() - chrono::Duration::days(7);
+        app.data.habits[0].set_note(date(), "planned rest");
+        app.data.habits[0].set_note(date() - chrono::Duration::days(1), "missed it");
+        app.data.cheats.set(date(), "gym", true);
+        let theme = app.theme;
+        let buffer = buffer(&mut app, 90, 38);
+        let crosses: Vec<_> = buffer
+            .content()
+            .iter()
+            .filter(|cell| cell.symbol() == "×")
+            .map(|cell| cell.fg)
+            .collect();
+        assert!(
+            crosses.contains(&theme.cheat),
+            "no cheat-coloured cross: {crosses:?}"
+        );
+        assert!(
+            crosses.contains(&theme.missed),
+            "no missed-coloured cross: {crosses:?}"
+        );
+    }
+
+    #[test]
+    fn long_notes_wrap_and_scroll_inside_the_dialog() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut app = app_with("Gym");
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        app.handle_key(key(KeyCode::Char('n'))).unwrap();
+        let text = format!("FIRST {} LAST", "word ".repeat(70));
+        for character in text.chars() {
+            app.handle_key(key(KeyCode::Char(character))).unwrap();
+        }
+        let screen = render(&mut app, 40, 24);
+        assert!(
+            !screen.contains("FIRST"),
+            "the first line should scroll away: {screen}"
+        );
+        assert!(
+            screen.contains("LAST"),
+            "the caret's line should stay visible: {screen}"
+        );
+    }
+
+    #[test]
+    fn partial_days_use_the_aligned_glyph() {
+        let mut app = app_with("Gym");
+        app.data.habits[0].target = 3;
+        let id = app.data.habits[0].id.clone();
+        app.data.log.set(date(), &id, true);
+        let screen = render(&mut app, 90, 30);
+        assert!(screen.contains('◍'), "{screen}");
+        assert!(!screen.contains('◐'), "{screen}");
     }
 
     #[test]

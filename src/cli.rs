@@ -423,7 +423,7 @@ pub fn run(
             }
             data.log.set_count(day, &habit.id, wanted);
             store.save(data)?;
-            let marker = if wanted >= target { "✓" } else { "◐" };
+            let marker = if wanted >= target { "✓" } else { "◍" };
             println!(
                 "{marker} {} {wanted}/{target} on {day} · {}",
                 habit.name,
@@ -445,7 +445,7 @@ pub fn run(
             if wanted == 0 {
                 println!("✗ {} undone on {day}", habit.name);
             } else {
-                println!("◐ {} now {wanted}/{} on {day}", habit.name, habit.per_day());
+                println!("◍ {} now {wanted}/{} on {day}", habit.name, habit.per_day());
             }
         }
         Command::PerDay { habit, value } => {

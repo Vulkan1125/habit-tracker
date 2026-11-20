@@ -6,7 +6,26 @@ All notable changes to `habit` are recorded here. The format follows
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **A Notes tab in the left pane**, between Tags and Archive. It lists every dated note across all
+  habits, newest first; `j`/`k` move, `enter` or a click jumps to that habit and day, and `n` edits
+  the selected note. The `/` filter matches habit text or note text.
+- **Notes on cheat and missed days now stand out.** They get a small `×` and the palette's cheat or
+  missed colour in both the detail pane and the Notes tab.
+
+### Changed
+
+- **The detail pane shows only the five most recent notes**, under a `recent notes` heading, with a
+  pointer to the Notes tab for the rest. The left-pane tabs are now ordered Habits → Tags → Notes →
+  Archive.
+- **Long notes wrap in the note dialog.** The popup grows with the text and keeps the caret's line
+  visible instead of cutting the note off at one line.
+
+### Fixed
+
+- **The partial-day marker is aligned with the other dots.** The ambiguous-width `◐` was replaced
+  by the narrow `◍` in the list, dot strip and CLI output.
 
 ## [0.12.0] (2026-11-13)
 
@@ -16,7 +35,7 @@ Nothing yet.
   water or two walks. `habit add "Drink water" --per-day 3` sets the target, `habit done water
   --count 2` records a partial day, `habit done water` adds one more, `habit undo water` takes one
   back, and `habit per-day water 4` changes the target. In the TUI, `space` adds an entry and `-`
-  removes one; rows show `2/3`, partial days use `◐`, and the detail pane shows the honest count.
+  removes one; rows show `2/3`, partial days use `◍`, and the detail pane shows the honest count.
   Partial days do not extend a streak. The CSV export gains `per_day` and `count` columns and still
   imports the old 12-column files. Data format version 5.
 
