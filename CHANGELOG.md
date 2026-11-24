@@ -4,6 +4,24 @@ All notable changes to `habit` are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [semantic versioning](https://semver.org/).
 
+## [0.14.0] (2026-11-24)
+
+### Added
+
+- **Backfilling a missed day is now easy to find.** `y` jumps to yesterday; the bottom bar names
+  the selected day and says `space marks it`, and `[` `] day · y yesterday` stays visible in the
+  medium-width hint. Nothing is recorded until you press `space` (or `-`), so an accidental `y`
+  cannot change the log.
+- **Click a day dot to backfill that day.** Each habit row's seven-day strip now accepts clicks:
+  the day is selected and marked in one step, with the same rules as `space` (a counted habit
+  gains one entry).
+
+### Fixed
+
+- **Notes rows keep the date and the note on one line.** The Notes tab was rendering the date as
+  its own line and the note underneath, which made a journal look like a wall of alternating dates
+  and paragraphs. Wrapped lines now sit under the note text, aligned with the first line.
+
 ## [0.13.1] (2026-11-20)
 
 ### Changed

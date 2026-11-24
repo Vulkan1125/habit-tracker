@@ -209,7 +209,9 @@ single token can offer alternatives: `#health|#fitness` matches habits with eith
   Counted habits also show their `2/3` progress, and a partial day gets `◍` until the target is
   met. Habits with an end date replace the schedule label with a countdown (`51d left`, `last day`,
   `ended`), turning amber in the final three days.
-- **Date navigation** (`[` `]`, `t` for today): check off, excuse, inspect or annotate any past day.
+- **Date navigation** (`[` `]`, `y` for yesterday, `t` for today): check off, excuse, inspect or
+  annotate any past day. You can also click any of the seven day dots on a habit row to backfill
+  that day directly, without leaving today's view first.
 - **Detail pane** with `description:` directly under the habit title, and the description text,
   schedule line and tags all indented beneath it, then current and best streak, this week's bar,
   30-day completion, a weekly bar chart for quota habits (the last four weeks, each with its
@@ -580,7 +582,9 @@ Nothing else to configure. The data file is created on the first change.
 | `b` | show or hide the bottom bar |
 | `c` | toggle a cheat day on the selected day |
 | `[` `]` | move the selected day back / forward (never into the future) |
+| `y` | jump to yesterday; `space` then marks it off (or adds one entry) |
 | `t` | jump back to today |
+| click | a tab, a habit row, a note, or one of the seven day dots (which marks that day) |
 | `j` `k`, `↑` `↓` | move the habit or tag selection |
 | `g` `G`, `Home` `End` | first / last habit |
 | `a` | add a habit |

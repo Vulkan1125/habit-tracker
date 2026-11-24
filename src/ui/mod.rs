@@ -168,11 +168,30 @@ fn hint(app: &App, max_width: usize) -> String {
                 .to_string()
         }
         Mode::Normal => {
-            let full = "space add · - one less · n note · c cheat · [ ] day · t today · tab pane · a add · e edit · d archive · x delete · u undo · / filter · b bar · T theme · m mode · ? help · q quit";
+            // A past day changes what `space`, `-` and `c` act on, so say so
+            // before anything else. This is also how people discover backfill
+            // without opening the help overlay.
+            if app.view_date != app.today {
+                let past = format!(
+                    "{} · space marks it · [ ] day · y yesterday · t today · ? help",
+                    app.view_date.format("%a %-d %b")
+                );
+                if width(&past) <= max_width {
+                    return past;
+                }
+                let short = format!(
+                    "{} · space mark · [ ] · t today",
+                    app.view_date.format("%a %-d %b")
+                );
+                if width(&short) <= max_width {
+                    return short;
+                }
+            }
+            let full = "space add · - one less · n note · c cheat · [ ] day · y yesterday · t today · tab pane · a add · e edit · d archive · x delete · u undo · / filter · b bar · T theme · m mode · ? help · q quit";
             if width(full) <= max_width {
                 return full.to_string();
             }
-            let medium = "space add · - less · n note · tab · b bar · / filter · ? help · q quit";
+            let medium = "space · - less · n note · [ ] day · y yesterday · tab · b bar · / filter · ? help · q";
             if width(medium) <= max_width {
                 return medium.to_string();
             }
@@ -814,6 +833,69 @@ mod tests {
         assert!(screen.contains("Read · 1 notes"), "{screen}");
         assert!(screen.contains("one chapter"), "{screen}");
         assert!(!screen.contains("felt strong"), "{screen}");
+    }
+
+    #[test]
+    fn the_footer_keeps_day_navigation_visible() {
+        let mut app = app_with("Gym");
+        let text = hint(&app, 120);
+        assert!(text.contains("[ ] day"), "{text}");
+        assert!(text.contains("y yesterday"), "{text}");
+
+        app.shift_day(-1);
+        let text = hint(&app, 120);
+        assert!(text.contains("space marks it"), "{text}");
+        assert!(text.contains("yesterday"), "{text}");
+    }
+
+    #[test]
+    fn note_rows_put_the_date_and_the_note_on_the_same_line() {
+        let mut app = app_with("Gym");
+        app.data.habits[0].set_note(date(), "felt strong");
+        app.select_tab(Tab::Notes);
+        let buffer = buffer(&mut app, 100, 30);
+        let width = buffer.area.width as usize;
+        let lines: Vec<String> = buffer
+            .content()
+            .chunks(width)
+            .map(|row| row.iter().map(|cell| cell.symbol()).collect())
+            .collect();
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("2026-11-10") && line.contains("felt strong")),
+            "{lines:#?}"
+        );
+    }
+
+    #[test]
+    fn clicking_a_day_dot_marks_that_day() {
+        let mut app = app_with("Gym");
+        app.data.habits[0].created = date() - chrono::Duration::days(5);
+        let buffer = buffer(&mut app, 90, 24);
+        let yesterday = date() - chrono::Duration::days(1);
+        let rect = app
+            .hits
+            .day_cells
+            .iter()
+            .find(|(_, day, _)| *day == yesterday)
+            .map(|(_, _, rect)| *rect)
+            .expect("yesterday should be one of the row dots");
+        // The recorded rectangle has to sit on the dot that was drawn.
+        assert_eq!(
+            buffer[(rect.x, rect.y)].symbol(),
+            "○",
+            "the day cells should line up with the row's dots"
+        );
+        app.handle_mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: rect.x,
+            row: rect.y,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        });
+        assert!(app.data.log.is_done(yesterday, "gym"));
+        assert_eq!(app.view_date, yesterday);
+        assert!(!app.data.log.is_done(date(), "gym"));
     }
 
     #[test]

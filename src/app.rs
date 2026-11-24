@@ -239,6 +239,9 @@ pub struct HitAreas {
     pub back: Option<Rect>,
     /// One rectangle per note row in the Notes tab, for click handling.
     pub note_rows: Vec<(usize, Rect)>,
+    /// One rectangle per day dot in a habit row, so a click can backfill that
+    /// day without moving the selection first.
+    pub day_cells: Vec<(usize, NaiveDate, Rect)>,
 }
 
 pub struct Confirm {
@@ -789,6 +792,28 @@ impl App {
             return;
         }
 
+        // A click on one of the seven day dots acts on that day directly; the
+        // row is selected first so `add_entry_selected` and the detail pane
+        // both talk about the habit under the pointer.
+        if let Some((index, day, _)) = self
+            .hits
+            .day_cells
+            .iter()
+            .find(|(_, _, rect)| rect_contains(*rect, column, row))
+            .copied()
+        {
+            if let Some(position) = self
+                .visible_indices()
+                .iter()
+                .position(|candidate| *candidate == index)
+            {
+                self.cursor = position;
+            }
+            self.view_date = day;
+            self.add_entry_selected();
+            return;
+        }
+
         let Some(ListRow::Habit(index)) = self.view_rows().get(offset).copied() else {
             return;
         };
@@ -1024,6 +1049,7 @@ impl App {
                 self.view_date = self.today;
                 self.flash_ok("back to today");
             }
+            KeyCode::Char('y') => self.view_yesterday(),
             KeyCode::Char('a') => {
                 self.mode = Mode::Form(Box::new(Form::new_with(self.today, self.modules.notify)))
             }
@@ -1126,6 +1152,18 @@ impl App {
         } else {
             self.flash_ok(format!("viewing {label}"));
         }
+    }
+
+    /// Jump to yesterday, the day people most often need to backfill.
+    ///
+    /// This only moves the selected day; `space` (or `-`) then acts on it, the
+    /// same as any other day, so nothing is recorded by an accidental press.
+    fn view_yesterday(&mut self) {
+        self.view_date = self.today - chrono::Duration::days(1);
+        self.flash_ok(format!(
+            "{} · space marks it · t back to today",
+            self.view_date.format("%a %-d %b")
+        ));
     }
 
     fn day_prefix(&self, date: NaiveDate) -> String {
@@ -2580,6 +2618,23 @@ mod tests {
         let mut app = app();
         app.shift_day(-1);
         app.toggle_selected();
+        assert!(app.data.log.is_done(date("2026-11-09"), "gym"));
+        assert!(!app.data.log.is_done(date("2026-11-10"), "gym"));
+    }
+
+    #[test]
+    fn y_selects_yesterday_so_a_missed_day_can_be_backfilled() {
+        let mut app = app();
+        app.handle_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.view_date, date("2026-11-09"));
+        let flash = app.flash.as_ref().unwrap();
+        assert!(flash.text.contains("space marks it"), "{}", flash.text);
+
+        // Selecting the day alone records nothing; space then backfills it.
+        assert!(!app.data.log.is_done(date("2026-11-09"), "gym"));
+        app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+            .unwrap();
         assert!(app.data.log.is_done(date("2026-11-09"), "gym"));
         assert!(!app.data.log.is_done(date("2026-11-10"), "gym"));
     }

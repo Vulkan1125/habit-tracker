@@ -30,6 +30,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &mut App) {
     app.hits.list = None;
     app.hits.back = None;
     app.hits.note_rows.clear();
+    app.hits.day_cells.clear();
     if inner.height == 0 {
         return;
     }
@@ -208,6 +209,40 @@ fn habit_list(frame: &mut Frame, area: Rect, app: &mut App) {
 
     app.list_state.select(selected);
     frame.render_stateful_widget(list, area, &mut app.list_state);
+
+    // Record the seven day dots of every visible habit row. A click on one of
+    // them backfills that day without the user having to move the selected day
+    // first.
+    let offset = app.list_state.offset();
+    let dots_x = area.x + area.width.saturating_sub(DOTS_WIDTH as u16);
+    for (row_index, row) in rows.iter().enumerate() {
+        if row_index < offset {
+            continue;
+        }
+        let y = area.y + (row_index - offset) as u16;
+        if y >= area.y + area.height {
+            break;
+        }
+        let ListRow::Habit(index) = row else {
+            continue;
+        };
+        let habit = &app.data.habits[*index];
+        for (column, (day, _)) in stats::recent(habit, &app.data.history(), app.view_date, DOTS)
+            .into_iter()
+            .enumerate()
+        {
+            app.hits.day_cells.push((
+                *index,
+                day,
+                Rect {
+                    x: dots_x + column as u16,
+                    y,
+                    width: 1,
+                    height: 1,
+                },
+            ));
+        }
+    }
 }
 
 fn tag_habits(frame: &mut Frame, area: Rect, app: &mut App, tag: &str) {
@@ -321,26 +356,36 @@ fn note_list(frame: &mut Frame, area: Rect, app: &mut App) {
                 NoteKind::Missed => ("× ", Style::default().fg(theme.missed)),
                 NoteKind::Normal => ("", Style::default().fg(theme.fg)),
             };
-            let mut lines = vec![Line::from(Span::styled(
-                format!("{:<10}", date.format("%Y-%m-%d")),
-                Style::default().fg(theme.dim),
-            ))];
-            let indent = 2usize;
-            let text_width = row_width.saturating_sub(indent).max(8);
-            for (chunk_index, chunk) in wrap(habit.note_on(*date).unwrap_or(""), text_width, 2)
-                .into_iter()
-                .enumerate()
-            {
-                let prefix = if chunk_index == 0 {
-                    Span::styled(marker, note_style)
+            // The date sits in its own column and the note starts beside it, so
+            // wrapped lines stay aligned under the first one instead of turning
+            // each note into a date line followed by a paragraph.
+            let date_column = 11usize;
+            let text_column = date_column + width(marker);
+            let text_width = row_width.saturating_sub(text_column).max(8);
+            let chunks = wrap(habit.note_on(*date).unwrap_or(""), text_width, 2);
+            let mut lines: Vec<Line> = Vec::with_capacity(chunks.len().max(1));
+            for (chunk_index, chunk) in chunks.into_iter().enumerate() {
+                if chunk_index == 0 {
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            format!("{:<10} ", date.format("%Y-%m-%d")),
+                            Style::default().fg(theme.dim),
+                        ),
+                        Span::styled(marker, note_style),
+                        Span::styled(chunk, note_style),
+                    ]));
                 } else {
-                    Span::raw(" ".repeat(width(marker)))
-                };
-                lines.push(Line::from(vec![
-                    Span::raw(" ".repeat(indent)),
-                    prefix,
-                    Span::styled(chunk, note_style),
-                ]));
+                    lines.push(Line::from(vec![
+                        Span::raw(" ".repeat(text_column)),
+                        Span::styled(chunk, note_style),
+                    ]));
+                }
+            }
+            if lines.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    format!("{:<10} ", date.format("%Y-%m-%d")),
+                    Style::default().fg(theme.dim),
+                )));
             }
             heights.push((items.len(), lines.len() as u16));
             items.push(ListItem::new(lines));

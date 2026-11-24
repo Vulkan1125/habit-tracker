@@ -28,8 +28,9 @@ The sequence was **3 → 4 → 1 → 2 → 5 → 6**. Notes and tags were isolat
 to live with immediately; dates and cheat days touched the streak engine, which is the part that
 must stay correct; the graph and the visual pass came last so they only had to be designed once.
 
-**Shipped:** the TUI now has a selected day (`[` `]`, `t`), so date-scoped features and backfilling
-work in the interface as well as the CLI. This was the prerequisite for cheat days and notes.
+**Shipped:** the TUI now has a selected day (`[` `]`, `y` for yesterday, `t` for today), and the
+seven day dots on each row are clickable, so date-scoped features and backfilling work in the
+interface as well as the CLI. This was the prerequisite for cheat days and notes.
 
 ---
 
